@@ -37,9 +37,15 @@ Vagrant.configure("2") do |config|
     end
 
     node.vm.provision "shell",
-      path: "provision/install_art.sh",
       path: "provision/install_sysmon.sh",
       env: { "HOST_IP" => HOST_IP, "LOG_PORT" => LOG_PORT.to_s }
+
+    node.vm.provision "shell", 
+    path: "provision/install_tools.sh"
+    
+    node.vm.provision "shell",
+    path: "provision/install_art.sh"
+
   end
 
 end

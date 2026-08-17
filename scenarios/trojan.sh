@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # trojan.sh - จำลองพฤติกรรม trojan / backdoor
-# ATT&CK: T1059.004 (Unix Shell), T1543.002 (Systemd Service),
-#         T1053.003 (Cron), T1547.006, T1082 (System Info Discovery),
-#         T1005 (Data from Local System), T1027 (Obfuscated Files)
+#
+# ATT&CK:
+#   T1082     3,4,5,6,8,12,25,26  System Information Discovery
+#   T1033     2                   System Owner/User Discovery
+#   T1057     1                   Process Discovery
+#   T1059.004 1,2,3,4,5           Unix Shell (มี 17 ตัว - เริ่มจาก 5 ตัวก่อน)
+#   T1053.003 1,2,3,4             Scheduled Task - Cron
+#   T1543.002 1,2,3               Systemd Service
+#   T1546.004 1,2,3,4             Event Triggered - Shell Config Modification
+#   T1027     1                   Obfuscated Files
+#   T1005     2                   Data from Local System
+#
+# หมายเหตุ: T1059.004 มี 17 tests  ถ้าอยาก event เยอะขึ้นเปลี่ยนเป็น
+#   atomic T1059.004 1,2,3,4,5,6,7,8,9,10   (ใช้เวลานานขึ้น ต้องเพิ่ม --duration)
 set -uo pipefail
 source "$(dirname "$0")/_lib.sh"
 banner "trojan"
@@ -11,41 +22,41 @@ setup_sandbox
 STAGE="$SANDBOX/trojan_stage"
 mkdir -p "$STAGE"
 
-# --- Stage 1: สำรวจระบบ (T1082, T1057, T1033) ---
-atomic T1082
-atomic T1057
-atomic T1033
+# --- Stage 1: recon ระบบและผู้ใช้ ---
+atomic T1082 3,4,5,6,8,12,25,26
+atomic T1033 2
+atomic T1057 1
 
-# --- Stage 2: รัน shell command (T1059.004) ---
-atomic T1059.004
+# --- Stage 2: รัน shell command หลายรูปแบบ ---
+atomic T1059.004 1,2,3,4,5
 
-# --- Stage 3: persistence ---
-atomic T1053.003          # cron
-atomic T1543.002          # systemd service
+# --- Stage 3: เก็บข้อมูลจากเครื่อง ---
+atomic T1005 2
 
-# --- Stage 4: เก็บข้อมูล (T1005, T1074.001) ---
-atomic T1005
+# --- Stage 4: persistence 3 ช่องทาง ---
+atomic T1053.003 1,2,3,4        # cron
+atomic T1543.002 1,2,3          # systemd service
+atomic T1546.004 1,2,3,4        # shell config (.bashrc ฯลฯ)
 
-# --- Stage 5: dropper จำลอง (สร้างไฟล์ซ่อน + obfuscate) ---
+# --- Stage 5: obfuscation ---
+atomic T1027 1
+
+# --- Stage 6: dropper จำลอง ---
 echo "[trojan] วาง payload จำลอง"
 cat > "$STAGE/.hidden_payload.sh" <<'PAYLOAD'
 #!/bin/bash
 # LAB SIMULATION - benign placeholder
-while true; do
+for i in $(seq 1 5); do
     date >> /tmp/lab_sandbox/trojan_stage/beacon.log
-    sleep 5
+    id   >> /tmp/lab_sandbox/trojan_stage/beacon.log
+    sleep 2
 done
 PAYLOAD
 chmod +x "$STAGE/.hidden_payload.sh"
-base64 "$STAGE/.hidden_payload.sh" > "$STAGE/payload.b64"    # T1027 obfuscation
+base64 "$STAGE/.hidden_payload.sh" > "$STAGE/payload.b64"
+"$STAGE/.hidden_payload.sh"
 
-# รัน payload สั้นๆ แล้วหยุด
-timeout 20 "$STAGE/.hidden_payload.sh" &
-PAYLOAD_PID=$!
-sleep 22
-kill $PAYLOAD_PID 2>/dev/null
-
-# --- Stage 6: obfuscation (T1027) ---
-atomic T1027
+# --- ล้าง persistence ที่ atomic test ทิ้งไว้ ---
+crontab -r 2>/dev/null || true
 
 done_banner "trojan"

@@ -46,35 +46,35 @@ SCENARIOS = {
         "script": "ransomware.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "run_atomic.sh",
+        "seed_cmd": "lab_sandbox",
         "attack": "T1486,T1490,T1083,T1070.004",
     },
     "trojan": {
         "script": "trojan.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "run_atomic.sh",
+        "seed_cmd": "lab_sandbox",
         "attack": "T1059.004,T1543.002,T1053.003,T1005,T1027",
     },
     "botnet": {
         "script": "botnet.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "run_atomic.sh",
+        "seed_cmd": "lab_sandbox",
         "attack": "T1071.001,T1105,T1571,T1016,T1049",
     },
     "exploit": {
         "script": "exploit.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "run_atomic.sh",
+        "seed_cmd": "lab_sandbox",
         "attack": "T1548.001,T1068,T1055,T1222.002,T1552.001",
     },
     "miner": {
         "script": "miner.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "run_atomic.sh",
+        "seed_cmd": "lab_sandbox",
         "attack": "T1496,T1053.003,T1562.001,T1057",
     },
 }
@@ -137,7 +137,7 @@ def run_pipeline(raw_log, scenario_name, spec):
     return labeled
 
 
-def run_scenario(name, vm, duration_min):
+def run_scenario(name, vm, duration_min, repeat=True):
     if name not in SCENARIOS:
         print(f"[!] ไม่รู้จัก scenario '{name}'  (มี: {', '.join(SCENARIOS)})")
         return
@@ -160,15 +160,33 @@ def run_scenario(name, vm, duration_min):
 
     print(f"[3/6] รัน scenario: {name}")
     if script.exists():
-        # ก๊อปสคริปต์เข้า VM แล้วรัน (ผ่าน shared folder /vagrant)
+        # สำคัญ: ก๊อปสคริปต์เข้า /tmp/lab_sandbox ก่อนรัน
+        # เพื่อให้ทุก process สืบสายจาก sandbox -> lineage labeling จับได้ครบ
         rel = script.relative_to(LAB_DIR).as_posix()
+        setup = (
+            "sudo mkdir -p /tmp/lab_sandbox && "
+            "sudo cp /vagrant/scenarios/_lib.sh /tmp/lab_sandbox/ && "
+            f"sudo cp /vagrant/{rel} /tmp/lab_sandbox/ && "
+            "sudo chmod +x /tmp/lab_sandbox/*.sh"
+        )
+        vm_exec(vm, setup)
+
         deadline = time.time() + duration_min * 60
-        vm_exec(vm, f"chmod +x /vagrant/{rel}; sudo /vagrant/{rel}")
-        # ปล่อยให้พฤติกรรมทำงานจนครบเวลา
-        remain = deadline - time.time()
-        if remain > 0:
-            print(f"    ...รอเก็บ log อีก {int(remain)} วินาที")
-            time.sleep(remain)
+        loop = 0
+        # วนซ้ำ scenario จนครบเวลา (ได้ event หนาแน่นกว่ารอเปล่า)
+        while time.time() < deadline:
+            loop += 1
+            print(f"    -- รอบที่ {loop} (เหลือ {int(deadline - time.time())} วินาที) --")
+            vm_exec(vm, f"sudo /tmp/lab_sandbox/{script.name}")
+            if time.time() >= deadline:
+                break
+            if not repeat:
+                remain = deadline - time.time()
+                if remain > 0:
+                    print(f"    ...ไม่ repeat, รอเก็บ log อีก {int(remain)} วินาที")
+                    time.sleep(remain)
+                break
+        print(f"    รวม {loop} รอบ")
     else:
         print(f"    [!] ยังไม่มีสคริปต์ {script}")
         print(f"    [!] สร้างไฟล์นี้ก่อน (ตามแนวทางที่เลือก) แล้วรันใหม่")
@@ -213,6 +231,8 @@ def main():
     ap.add_argument("--scenario", choices=list(SCENARIOS))
     ap.add_argument("--vm", default="target1")
     ap.add_argument("--duration", type=float, default=3, help="นาที")
+    ap.add_argument("--no-repeat", action="store_true",
+                    help="รัน scenario ครั้งเดียว แล้วรอเก็บ log เฉยๆ จนครบเวลา")
     ap.add_argument("--save-snapshot", action="store_true")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--list", action="store_true")
@@ -233,7 +253,7 @@ def main():
 
     if not args.scenario:
         ap.error("ต้องระบุ --scenario หรือ --save-snapshot / --status / --list")
-    run_scenario(args.scenario, args.vm, args.duration)
+    run_scenario(args.scenario, args.vm, args.duration, repeat=not args.no_repeat)
 
 
 if __name__ == "__main__":
