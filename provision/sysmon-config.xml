@@ -1,0 +1,44 @@
+<Sysmon schemaversion="4.81">
+  <!--
+    Config เฟส 1 (แก้ไข) - เอา FieldSizes ออก, ลด schemaversion
+    onmatch="exclude" แบบว่างเปล่า = เก็บทุก event ของชนิดนั้น
+  -->
+  <EventFiltering>
+
+    <!-- ID 1: ProcessCreate -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessCreate onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 3: NetworkConnect -->
+    <RuleGroup name="" groupRelation="or">
+      <NetworkConnect onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 5: ProcessTerminate -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessTerminate onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 9: RawAccessRead -->
+    <RuleGroup name="" groupRelation="or">
+      <RawAccessRead onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 10: ProcessAccess -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessAccess onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 11: FileCreate -->
+    <RuleGroup name="" groupRelation="or">
+      <FileCreate onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 23: FileDelete -->
+    <RuleGroup name="" groupRelation="or">
+      <FileDelete onmatch="exclude"/>
+    </RuleGroup>
+
+  </EventFiltering>
+</Sysmon>
