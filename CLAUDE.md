@@ -95,6 +95,9 @@ IsExecutable, Archived`
 | malicious แค่ 5.1% | scenario รันจาก `/vagrant/` ไม่ตรง seed | ก๊อป scenario ไป `/tmp/lab_sandbox` ก่อนรัน |
 | `atomic T1070.004` ไม่ระบุเลข | test 8 = **Delete Filesystem ล้างเครื่อง** | ล็อกเป็น `1,2,3` เท่านั้น |
 | checker v1 บอก "ไม่มี Linux test" ผิด | grep คำว่า "linux" ในชื่อ test | v2 อ่าน `supported_platforms` จาก YAML |
+| `vagrant ssh -c` ค้างเงียบ ไม่มีเอาต์พุต | ACL ของ `private_key` กว้างเกิน (Authenticated Users) → OpenSSH ทิ้ง key แล้วตกไปถาม **password ของ vagrant** | `icacls /inheritance:r /grant:r "$USER:(R)"` + `preflight_ssh_key()` เช็คให้ทุกรอบ |
+| log ไม่ถึง host เลยหลัง revert (Send-Q บวมค้าง) | snapshot คืน **memory state** มาด้วย → rsyslogd ตื่นมาพร้อม TCP socket เก่าที่ host ตายไปแล้ว | `systemctl restart rsyslog` หลังบูตทุกครั้ง (orchestrator ทำให้แล้ว) |
+| **FileCreate(11) + RawAccessRead(9) หายเกลี้ยงทั้งรอบ** (event อื่นมาปกติ) | ไม่ใช่ rate limit! snapshot คืน memory state → **eBPF probe ของ sysmon อยู่ในสภาพ stale** ยิง 2 event นี้ไม่ออก | `systemctl restart sysmon` หลังบูต — ยืนยันแล้ว event 11 กลับมา 108 ตัวใน 15 วินาที |
 
 ---
 
@@ -149,11 +152,14 @@ CreationUtcTime, root_image, is_seed, label_method, enrich_method
 - enrichment ดันจาก 41.8% → 90.2%
 
 **ค้างอยู่:**
-1. ยืนยันว่า FileCreate กลับมาหลังปิด rate limit
+1. ~~ยืนยันว่า FileCreate กลับมาหลังปิด rate limit~~ → **เจอสาเหตุจริงแล้ว: ไม่ใช่ rate limit**
+   snapshot restore ทำให้ eBPF probe ของ sysmon stale → ต้อง `restart sysmon` หลังบูต (ใส่ใน orchestrator แล้ว)
+   หมายเหตุ: rate limit ถูกปิดอยู่แล้วจริง (`systemd-analyze cat-config` ยืนยัน `RateLimitIntervalSec=0`)
 2. ยืนยันว่า malicious % ขึ้นเป็น 15-40% หลังแก้ seed
-3. แก้ปัญหา process ที่ถาม password/passphrase ค้าง terminal
-   (`gpg`, `ccrypt` ใน T1486 / sudo NOPASSWD) — วิธี: `< /dev/null` + `timeout` ใน `atomic()`
-   และ `stdin=subprocess.DEVNULL` ใน `vm_exec()`
+3. ~~process ที่ถาม password/passphrase ค้าง terminal~~ → **แก้โค้ดแล้ว รอยืนยันบน VM จริง**
+   `atomic()` = `setsid --wait` + `timeout` + `< /dev/null` + `reap_stuck` (pkill)
+   `vm_exec()` = `stdin=DEVNULL` + timeout + `vm_kill_stuck()`; ฝั่ง VM ครอบ `sudo timeout` อีกชั้น
+   ปรับเวลาได้ด้วย `--atomic-timeout` (default 240s)
 4. ขยายเป็น 5 VM (loop ใน Vagrantfile)
 5. เก็บข้อมูลจริง ≥20,000 events ตามตาราง 15 รอบใน RUNBOOK.md
 6. **เฟส 3**: preprocessing + PCA + เทรน 7 โมเดลตามเปเปอร์

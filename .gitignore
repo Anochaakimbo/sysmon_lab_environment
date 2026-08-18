@@ -3,3 +3,6 @@
 atomic_report.txt
 host/logs/*
 host/dataset/*
+
+host/__pycache__/
+__pycache__/

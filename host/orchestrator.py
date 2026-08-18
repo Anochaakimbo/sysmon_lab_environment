@@ -16,6 +16,7 @@ orchestrator.py (v2) - ต้นแบบ backend สำหรับ web dashboa
 """
 import argparse
 import json
+import os
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -27,6 +28,29 @@ SCENARIO_DIR = LAB_DIR / "scenarios"                  # สคริปต์จ
 LOG_DIR = HOST_DIR / "logs"
 DATASET_DIR = HOST_DIR / "dataset"
 CLEAN_SNAPSHOT = "clean"
+
+
+def preflight_ssh_key(vm):
+    """OpenSSH บน Windows ปฏิเสธ private key ที่สิทธิ์ไฟล์กว้างเกินไป
+    แล้วตกไปใช้ password auth -> `vagrant ssh -c` ค้างรอ password ตลอดกาล
+    (เคยทำให้ทั้งรอบค้างที่ขั้น setup มาแล้ว) - ตรวจและรัดสิทธิ์ให้อัตโนมัติ"""
+    if os.name != "nt":
+        return
+    keys = list((LAB_DIR / ".vagrant" / "machines" / vm).glob("*/private_key"))
+    if not keys:
+        return
+    key = keys[0]
+    try:
+        acl = subprocess.run(["icacls", str(key)], capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if not any(w in acl for w in ("Authenticated Users", r"BUILTIN\Users", "Everyone")):
+        return
+    print(f"[preflight] private key สิทธิ์กว้างเกินไป -> รัดสิทธิ์ {key}")
+    subprocess.run(["icacls", str(key), "/inheritance:r",
+                    "/grant:r", f"{os.environ.get('USERNAME', '')}:(R)"],
+                   capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30)
 
 # ---------------------------------------------------------------- scenarios
 # แต่ละ scenario: script ที่รันใน VM + วิธี label
@@ -80,13 +104,29 @@ SCENARIOS = {
 }
 
 
-def run(cmd, capture=False, check=True):
+ATOMIC_TIMEOUT_DEFAULT = 240   # วินาทีต่อ atomic 1 test
+
+# process ใน VM ที่เคยค้างรอ password/passphrase (gpg, ccrypt ใน T1486)
+# ใส่ [ ] คั่นตัวอักษร ไม่ให้ pkill ฆ่า shell ที่รันคำสั่งนี้เอง
+STUCK_PATTERNS = [
+    "Invoke-Atomic[T]est",
+    "run_atomi[c].sh",
+    "pinentr[y]",
+    "gpg-agen[t]",
+    "ccryp[t]",
+]
+
+
+def run(cmd, capture=False, check=True, timeout=None):
+    """stdin=DEVNULL เสมอ - process ที่ถาม password จะได้ EOF แทนที่จะค้างรอ terminal"""
     print(f"    $ {' '.join(cmd)}")
     if capture:
-        r = subprocess.run(cmd, cwd=LAB_DIR, capture_output=True, text=True)
+        r = subprocess.run(cmd, cwd=LAB_DIR, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=timeout)
         return r.stdout + r.stderr
-    subprocess.run(cmd, cwd=LAB_DIR, check=check)
-    return None
+    r = subprocess.run(cmd, cwd=LAB_DIR, check=check,
+                       stdin=subprocess.DEVNULL, timeout=timeout)
+    return r.returncode
 
 
 # ---- vagrant wrappers (แต่ละอันจะกลายเป็น API endpoint ของ dashboard) ----
@@ -96,7 +136,29 @@ def snapshot_save(vm):    run(["vagrant", "snapshot", "save", vm, CLEAN_SNAPSHOT
 def snapshot_restore(vm): run(["vagrant", "snapshot", "restore", vm, CLEAN_SNAPSHOT, "--no-provision"])
 def vm_up(vm):            run(["vagrant", "up", vm])
 def vm_halt(vm):          run(["vagrant", "halt", vm])
-def vm_exec(vm, command): run(["vagrant", "ssh", vm, "-c", command])
+
+
+def vm_kill_stuck(vm):
+    """ฆ่า process ที่ค้างรอ input ใน VM (เรียกหลัง vm_exec timeout)"""
+    sweep = " ; ".join(f"sudo pkill -KILL -f '{p}'" for p in STUCK_PATTERNS)
+    try:
+        run(["vagrant", "ssh", vm, "-c", sweep + " ; true"], check=False, timeout=90)
+    except subprocess.TimeoutExpired:
+        print(f"    [!] เก็บกวาด {vm} ไม่สำเร็จ - VM จะถูก revert รอบหน้าอยู่แล้ว")
+
+
+def vm_exec(vm, command, timeout=None):
+    """รันคำสั่งใน VM แบบไม่มี stdin
+    ถ้าค้างเกิน timeout -> ตัด ssh ทิ้ง เก็บกวาด process แล้วไปต่อ (ไม่ล้มทั้งรอบ)"""
+    try:
+        rc = run(["vagrant", "ssh", vm, "-c", command], check=False, timeout=timeout)
+        if rc not in (0, None):
+            print(f"    [i] คำสั่งจบด้วย exit {rc} (ไปต่อ)")
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"    [!] คำสั่งใน {vm} ค้างเกิน {timeout} วินาที - ตัดทิ้งแล้วเก็บกวาด")
+        vm_kill_stuck(vm)
+        return False
 
 
 def run_pipeline(raw_log, scenario_name, spec):
@@ -137,7 +199,7 @@ def run_pipeline(raw_log, scenario_name, spec):
     return labeled
 
 
-def run_scenario(name, vm, duration_min, repeat=True):
+def run_scenario(name, vm, duration_min, repeat=True, atomic_timeout=ATOMIC_TIMEOUT_DEFAULT):
     if name not in SCENARIOS:
         print(f"[!] ไม่รู้จัก scenario '{name}'  (มี: {', '.join(SCENARIOS)})")
         return
@@ -149,14 +211,28 @@ def run_scenario(name, vm, duration_min, repeat=True):
     print(f"  SCENARIO : {name}   ({spec['label']})")
     print(f"  VM       : {vm}")
     print(f"  DURATION : {duration_min} นาที")
+    print(f"  ATOMIC   : timeout {atomic_timeout} วินาที/test")
     print(f"{'='*58}\n")
 
+    preflight_ssh_key(vm)
     print("[1/6] คืนสภาพ VM -> clean snapshot")
     snapshot_restore(vm)
 
     print("[2/6] บูต VM")
     vm_up(vm)
     time.sleep(12)   # รอ sysmon/rsyslog พร้อม
+
+    # snapshot restore คืน memory state มาด้วย -> rsyslogd ตื่นมาพร้อม TCP socket เก่า
+    # ที่ฝั่ง host ตายไปแล้ว ส่งข้อมูลออกไปก็ไม่มีใคร ACK (Send-Q ค้าง) = log ไม่ถึง host เลย
+    # ต้องบังคับให้ต่อใหม่ทุกครั้งหลังบูต
+    # sysmon ก็เจอปัญหาเดียวกัน: eBPF probe ที่ถูกคืนมาจาก memory snapshot อยู่ในสภาพ stale
+    # -> หยุดยิง FileCreate(11) และ RawAccessRead(9) เงียบๆ ทั้งรอบ (event อื่นยังมาปกติ)
+    # ยืนยันแล้ว: restart แล้ว event 11 กลับมา 108 ตัวใน 15 วินาที
+    print("    รีสตาร์ท sysmon + rsyslog (กัน eBPF/TCP socket ค้างจาก snapshot)")
+    vm_exec(vm, "sudo systemctl restart sysmon", timeout=120)
+    time.sleep(5)
+    vm_exec(vm, "sudo systemctl restart rsyslog", timeout=120)
+    time.sleep(3)
 
     print(f"[3/6] รัน scenario: {name}")
     if script.exists():
@@ -169,7 +245,7 @@ def run_scenario(name, vm, duration_min, repeat=True):
             f"sudo cp /vagrant/{rel} /tmp/lab_sandbox/ && "
             "sudo chmod +x /tmp/lab_sandbox/*.sh"
         )
-        vm_exec(vm, setup)
+        vm_exec(vm, setup, timeout=180)
 
         deadline = time.time() + duration_min * 60
         loop = 0
@@ -177,7 +253,14 @@ def run_scenario(name, vm, duration_min, repeat=True):
         while time.time() < deadline:
             loop += 1
             print(f"    -- รอบที่ {loop} (เหลือ {int(deadline - time.time())} วินาที) --")
-            vm_exec(vm, f"sudo /tmp/lab_sandbox/{script.name}")
+            # timeout ฝั่ง VM ตัดที่ต้นทาง (ฆ่าทั้ง process group)
+            # timeout ฝั่ง host เผื่อไว้อีกชั้นกรณี ssh เองค้าง
+            cap = int(max(180, deadline - time.time() + 120))
+            vm_exec(vm,
+                    f"sudo timeout --kill-after=30s {cap}s "
+                    f"env ATOMIC_TIMEOUT={atomic_timeout} "
+                    f"bash /tmp/lab_sandbox/{script.name}",
+                    timeout=cap + 90)
             if time.time() >= deadline:
                 break
             if not repeat:
@@ -233,6 +316,8 @@ def main():
     ap.add_argument("--duration", type=float, default=3, help="นาที")
     ap.add_argument("--no-repeat", action="store_true",
                     help="รัน scenario ครั้งเดียว แล้วรอเก็บ log เฉยๆ จนครบเวลา")
+    ap.add_argument("--atomic-timeout", type=int, default=ATOMIC_TIMEOUT_DEFAULT,
+                    help="วินาทีสูงสุดต่อ atomic 1 test (กันค้างรอ password)")
     ap.add_argument("--save-snapshot", action="store_true")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--list", action="store_true")
@@ -253,7 +338,8 @@ def main():
 
     if not args.scenario:
         ap.error("ต้องระบุ --scenario หรือ --save-snapshot / --status / --list")
-    run_scenario(args.scenario, args.vm, args.duration, repeat=not args.no_repeat)
+    run_scenario(args.scenario, args.vm, args.duration, repeat=not args.no_repeat,
+                 atomic_timeout=args.atomic_timeout)
 
 
 if __name__ == "__main__":
