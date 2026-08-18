@@ -128,6 +128,9 @@ T1496 1              T1546.004 1..7     T1132.001 1,2
 process ที่เกิด**หลัง** Sysmon มี CommandLine, daemon ที่เกิด**ก่อน**ไม่มี
 ถ้า benign เป็น daemon ล้วน โมเดลจะเรียน "CommandLine ว่าง = benign"
 → `benign.sh` ต้องสร้าง process ใหม่เยอะๆ ไม่ใช่ปล่อย idle
+**วัดจริง 18 ส.ค. 2026:** CommandLine ว่าง 592 แถว (5.1%) เป็น benign **97.8%**
+ยังมี leak เหลืออยู่แต่เล็ก — ตอนเทรนให้ลอง drop แถวที่ CommandLine ว่าง
+หรือใส่ `has_commandline` เป็น feature ตรงๆ แล้ววัดเทียบ
 
 ### 3. คอลัมน์ที่ห้ามใส่เป็น feature
 ```
@@ -155,13 +158,15 @@ CreationUtcTime, root_image, is_seed, label_method, enrich_method
 1. ~~ยืนยันว่า FileCreate กลับมาหลังปิด rate limit~~ → **เจอสาเหตุจริงแล้ว: ไม่ใช่ rate limit**
    snapshot restore ทำให้ eBPF probe ของ sysmon stale → ต้อง `restart sysmon` หลังบูต (ใส่ใน orchestrator แล้ว)
    หมายเหตุ: rate limit ถูกปิดอยู่แล้วจริง (`systemd-analyze cat-config` ยืนยัน `RateLimitIntervalSec=0`)
-2. ยืนยันว่า malicious % ขึ้นเป็น 15-40% หลังแก้ seed
+2. ~~ยืนยันว่า malicious % ขึ้นเป็น 15-40%~~ → **ปิดแล้ว 18 ส.ค. 2026: รวม 2 รอบได้ 30.9%**
+   (ransomware 65.1% + benign 0% = 11,691 events) lineage ไม่ over-label, benign สะอาด 100%
 3. ~~process ที่ถาม password/passphrase ค้าง terminal~~ → **แก้โค้ดแล้ว รอยืนยันบน VM จริง**
    `atomic()` = `setsid --wait` + `timeout` + `< /dev/null` + `reap_stuck` (pkill)
    `vm_exec()` = `stdin=DEVNULL` + timeout + `vm_kill_stuck()`; ฝั่ง VM ครอบ `sudo timeout` อีกชั้น
    ปรับเวลาได้ด้วย `--atomic-timeout` (default 240s)
 4. ขยายเป็น 5 VM (loop ใน Vagrantfile)
 5. เก็บข้อมูลจริง ≥20,000 events ตามตาราง 15 รอบใน RUNBOOK.md
+   (มีแล้ว 11,691 จาก 2 รอบ: `fix3_final_*` ransomware + `fix3_benign_*`)
 6. **เฟส 3**: preprocessing + PCA + เทรน 7 โมเดลตามเปเปอร์
    (Naive Bayes, Decision Tree, Random Forest, SVM / Isolation Forest, LOF, One-Class SVM)
 7. แผนอนาคต: merge กับ dataset ฝั่ง Windows (มีคอลัมน์ `platform` เตรียมไว้แล้ว)
