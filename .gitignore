@@ -6,3 +6,6 @@ host/dataset/*
 
 host/__pycache__/
 __pycache__/
+
+# เปเปอร์อ้างอิง + baseline CSV (26MB) - ไฟล์ภายนอก โหลดใหม่ได้ ไม่เอาเข้า git
+reference/
