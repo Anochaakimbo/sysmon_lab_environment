@@ -27,6 +27,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Windows console default = cp1252 -> print ภาษาไทย crash; บังคับ utf-8
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 import orchestrator as orch
 
 HOST_DIR = Path(__file__).resolve().parent
@@ -34,11 +42,16 @@ LAB_DIR = HOST_DIR.parent
 LOG_DIR = HOST_DIR / "logs"
 DATASET_DIR = HOST_DIR / "dataset"
 
+# preset ชุด scenario สะอาด (6 ตัว) สำหรับเก็บ dataset ครบชุด
+CLEAN_SET = ["benign", "ransomware", "botnet", "miner", "exploit_real", "trojan_real"]
+
 # ---- สถานะรวม (job เดียวต่อครั้ง เพราะ sequential) ----
 STATE = {
     "job": None,          # ชื่อ scenario ที่กำลังรัน
     "phase": "idle",      # idle / running / done / error
     "started": None,
+    "queue": [],          # scenario ที่รอในคิว
+    "done": [],           # scenario ที่เก็บเสร็จรอบนี้
     "log": [],            # บรรทัด log สด (เก็บ 400 บรรทัดล่าสุด)
 }
 COLLECTORS = {"receiver": None, "c2": None}
@@ -77,31 +90,48 @@ def stop_collectors():
 
 
 # ---------------------------------------------------------- run scenario
-def run_scenario_bg(name, duration, atomic_timeout):
-    """รัน scenario ใน background thread - เก็บ stdout ของ orchestrator ไป log สด"""
+class _LogStream(io.TextIOBase):
+    def write(self, s):
+        for ln in s.splitlines():
+            if ln.strip():
+                logline(ln)
+        return len(s)
+
+
+def _run_one(name, duration, atomic_timeout):
+    """รัน scenario 1 ตัว (revert->boot->run->pipeline) - เก็บ stdout ไป log สด"""
     STATE.update(job=name, phase="running", started=datetime.now().isoformat())
     session = f"{name}_dash_{datetime.now():%H%M%S}"
     start_collectors(session)
-
-    class LogStream(io.TextIOBase):
-        def write(self, s):
-            for ln in s.splitlines():
-                if ln.strip():
-                    logline(ln)
-            return len(s)
-
-    ls = LogStream()
+    ls = _LogStream()
+    ok = False
     try:
         with redirect_stdout(ls), redirect_stderr(ls):
             orch.run_scenario(name, "target1", float(duration),
                               repeat=True, atomic_timeout=int(atomic_timeout))
-        STATE["phase"] = "done"
         logline(f"[dashboard] เสร็จ scenario '{name}'")
+        ok = True
     except Exception as e:  # noqa
-        STATE["phase"] = "error"
-        logline(f"[dashboard] ล้ม: {e}")
+        logline(f"[dashboard] '{name}' ล้ม: {e}")
     finally:
         stop_collectors()
+    return ok
+
+
+def run_worker(scenarios, duration, atomic_timeout):
+    """รัน scenario ในคิวเรียงกัน (1 ตัวต่อครั้ง) - หัวใจของ automation หลายตัว"""
+    with LOCK:
+        STATE["queue"] = list(scenarios)
+        STATE["done"] = []
+    logline(f"[dashboard] เริ่มคิว {len(scenarios)} scenario: {', '.join(scenarios)}")
+    for name in scenarios:
+        with LOCK:
+            STATE["queue"] = [s for s in STATE["queue"] if s != name]
+        ok = _run_one(name, duration, atomic_timeout)
+        with LOCK:
+            STATE["done"].append({"name": name, "ok": ok})
+    STATE.update(job=None, phase="done")
+    logline(f"[dashboard] จบคิวทั้งหมด ({len(scenarios)} scenario)")
 
 
 def run_merge():
@@ -178,7 +208,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/state":
             with LOCK:
                 st = {"job": STATE["job"], "phase": STATE["phase"],
-                      "busy": busy(), "log": STATE["log"][-120:]}
+                      "busy": busy(), "queue": STATE["queue"],
+                      "done": STATE["done"], "log": STATE["log"][-120:]}
             return self._send(200, json.dumps(st))
         if self.path == "/api/scenarios":
             sc = [{"name": k, "attack": v.get("attack", ""),
@@ -192,17 +223,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(n) or b"{}")
-        if self.path == "/api/run":
+        if self.path in ("/api/run", "/api/run_batch"):
             if busy():
                 return self._send(409, json.dumps({"error": "มี job รันอยู่"}))
-            name = body.get("scenario")
-            if name not in orch.SCENARIOS:
-                return self._send(400, json.dumps({"error": "ไม่รู้จัก scenario"}))
+            if self.path == "/api/run":
+                names = [body.get("scenario")]
+            else:
+                names = body.get("scenarios") or CLEAN_SET
+            names = [n for n in names if n in orch.SCENARIOS]
+            if not names:
+                return self._send(400, json.dumps({"error": "ไม่มี scenario ที่ใช้ได้"}))
             dur = body.get("duration", 5)
             at = body.get("atomic_timeout", 240)
-            threading.Thread(target=run_scenario_bg, args=(name, dur, at),
+            threading.Thread(target=run_worker, args=(names, dur, at),
                              daemon=True).start()
-            return self._send(200, json.dumps({"ok": True, "started": name}))
+            return self._send(200, json.dumps({"ok": True, "started": names}))
         if self.path == "/api/merge":
             if busy():
                 return self._send(409, json.dumps({"error": "มี job รันอยู่"}))
@@ -265,8 +300,13 @@ th{color:var(--mut);font-weight:500}
       <label>duration (นาที)</label><input id="dur" type="number" value="5" min="1">
       <label>atomic timeout</label><input id="at" type="number" value="240">
     </div>
-    <div class="grid" id="scbtns"></div>
-    <div class="ctl" style="margin-top:14px">
+    <div id="scbtns"></div>
+    <div class="ctl" style="margin-top:14px;flex-wrap:wrap">
+      <button onclick="selectClean()">✓ เลือก 6 ตัวสะอาด</button>
+      <button onclick="runBatch()" id="batchbtn" class="run">▶ เก็บทั้งชุดที่เลือก</button>
+    </div>
+    <div id="queue" style="color:var(--mut);font-size:12px;margin-top:6px"></div>
+    <div class="ctl" style="margin-top:10px">
       <button onclick="snap()" id="snapbtn">💾 Save clean snapshot</button>
     </div>
   </div>
@@ -288,24 +328,38 @@ th{color:var(--mut);font-weight:500}
 </div>
 <script>
 const $=s=>document.querySelector(s);
+const CLEAN=["benign","ransomware","botnet","miner","exploit_real","trojan_real"];
 let scenarios=[];
 async function j(u,m,b){const r=await fetch(u,{method:m||'GET',
   headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return r.json()}
 async function loadSc(){scenarios=await j('/api/scenarios');
   $('#scbtns').innerHTML=scenarios.map(s=>{
     const real=s.name.includes('real');
-    return `<button class="run" onclick="run('${s.name}')" title="${s.attack}">
-      ${real?'🔴':'🟢'} ${s.name}</button>`}).join('')}
+    return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      <input type="checkbox" class="scchk" value="${s.name}" ${CLEAN.includes(s.name)?'checked':''}>
+      <button class="run" style="flex:1;text-align:left" onclick="run('${s.name}')" title="${s.attack}">
+        ${real?'🔴':'🟢'} ${s.name}</button></div>`}).join('')}
+function selected(){return[...document.querySelectorAll('.scchk:checked')].map(c=>c.value)}
+function selectClean(){document.querySelectorAll('.scchk').forEach(c=>c.checked=CLEAN.includes(c.value))}
 async function run(name){await j('/api/run','POST',
   {scenario:name,duration:+$('#dur').value,atomic_timeout:+$('#at').value})}
+async function runBatch(){const s=selected();if(!s.length)return alert('เลือก scenario ก่อน');
+  if(!confirm(`เก็บ ${s.length} scenario เรียงกัน?\n${s.join(', ')}\n\nใช้เวลา ~${s.length*13} นาที`))return;
+  await j('/api/run_batch','POST',{scenarios:s,duration:+$('#dur').value,atomic_timeout:+$('#at').value})}
 async function merge(){await j('/api/merge','POST',{})}
 async function snap(){await j('/api/snapshot','POST',{})}
 async function tick(){
   const st=await j('/api/state');
   const busy=st.busy;
-  $('#jobstate').textContent=busy?`▶ ${st.job} (${st.phase})`:st.phase;
+  $('#jobstate').textContent=busy?`▶ ${st.job||'...'} (${st.phase})`:st.phase;
   $('#jobstate').style.borderColor=busy?'var(--warn)':(st.phase=='error'?'var(--bad)':'var(--border)');
-  document.querySelectorAll('#scbtns button,#mergebtn,#snapbtn').forEach(b=>b.disabled=busy);
+  document.querySelectorAll('#scbtns button,#mergebtn,#snapbtn,#batchbtn').forEach(b=>b.disabled=busy);
+  const q=$('#queue');
+  if((st.done&&st.done.length)||(st.queue&&st.queue.length)){
+    const done=(st.done||[]).map(d=>`${d.ok?'✅':'❌'} ${d.name}`).join('  ');
+    const pend=(st.queue||[]).map(n=>`⏳ ${n}`).join('  ');
+    q.innerHTML=`คิว: ${done} ${busy&&st.job?'▶ '+st.job:''}  ${pend}`;
+  }else q.innerHTML='';
   const lg=$('#log');const atBottom=lg.scrollTop+lg.clientHeight>=lg.scrollHeight-40;
   lg.textContent=st.log.join('\n');if(atBottom)lg.scrollTop=lg.scrollHeight;
   const ds=await j('/api/dataset');
