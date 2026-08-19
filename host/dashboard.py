@@ -43,7 +43,8 @@ LOG_DIR = HOST_DIR / "logs"
 DATASET_DIR = HOST_DIR / "dataset"
 
 # preset ชุด scenario สะอาด (6 ตัว) สำหรับเก็บ dataset ครบชุด
-CLEAN_SET = ["benign", "ransomware", "botnet", "miner", "exploit_real", "trojan_real"]
+# ใช้ real malware ให้ครบ 3 ตัว (miner_real/exploit_real/trojan_real) เพื่อความสม่ำเสมอ
+CLEAN_SET = ["benign", "ransomware", "botnet", "miner_real", "exploit_real", "trojan_real"]
 
 # ---- สถานะรวม (job เดียวต่อครั้ง เพราะ sequential) ----
 STATE = {
@@ -54,7 +55,7 @@ STATE = {
     "done": [],           # scenario ที่เก็บเสร็จรอบนี้
     "log": [],            # บรรทัด log สด (เก็บ 400 บรรทัดล่าสุด)
 }
-COLLECTORS = {"receiver": None, "c2": None}
+COLLECTORS = {"receiver": None, "pool": None, "c2": None}
 LOCK = threading.Lock()
 
 
@@ -65,24 +66,25 @@ def logline(msg):
 
 
 # ---------------------------------------------------------- collectors
+def _spawn(script, *args):
+    return subprocess.Popen([sys.executable, str(HOST_DIR / script), *args],
+                            cwd=str(HOST_DIR), stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+
+
 def start_collectors(session):
-    """เปิด log_receiver (ชื่อ session) + c2_server ถ้ายังไม่เปิด"""
+    """เปิด log_receiver + mining_pool (stratum :3333) + c2_server (:8080/:4444)
+    mining_pool ต้อง start ก่อนเพื่อยึด 3333 (miner_real ใช้ stratum จริง)"""
     stop_collectors()
-    rec = subprocess.Popen([sys.executable, str(HOST_DIR / "log_receiver.py"),
-                            "--session", session],
-                           cwd=str(HOST_DIR),
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           stdin=subprocess.DEVNULL)
-    c2 = subprocess.Popen([sys.executable, str(HOST_DIR / "c2_server.py")],
-                          cwd=str(HOST_DIR),
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                          stdin=subprocess.DEVNULL)
-    COLLECTORS["receiver"], COLLECTORS["c2"] = rec, c2
-    logline(f"[collectors] เปิด log_receiver (session={session}) + c2_server")
+    COLLECTORS["receiver"] = _spawn("log_receiver.py", "--session", session)
+    COLLECTORS["pool"] = _spawn("mining_pool.py")      # :3333 stratum
+    time.sleep(0.5)
+    COLLECTORS["c2"] = _spawn("c2_server.py")          # :8080 + :4444
+    logline(f"[collectors] log_receiver(session={session}) + mining_pool + c2_server")
 
 
 def stop_collectors():
-    for k in ("receiver", "c2"):
+    for k in ("receiver", "pool", "c2"):
         p = COLLECTORS.get(k)
         if p and p.poll() is None:
             p.terminate()
@@ -328,7 +330,7 @@ th{color:var(--mut);font-weight:500}
 </div>
 <script>
 const $=s=>document.querySelector(s);
-const CLEAN=["benign","ransomware","botnet","miner","exploit_real","trojan_real"];
+const CLEAN=["benign","ransomware","botnet","miner_real","exploit_real","trojan_real"];
 let scenarios=[];
 async function j(u,m,b){const r=await fetch(u,{method:m||'GET',
   headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return r.json()}

