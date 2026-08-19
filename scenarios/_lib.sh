@@ -79,6 +79,26 @@ noprompt() {
     return 0
 }
 
+# atomic_cleanup <TECHNIQUE> [TEST_NUMBERS]
+# เรียก cleanup command ที่ Atomic Red Team เตรียมไว้ให้ทุก test
+# จำเป็นเพราะ orchestrator วน scenario ซ้ำ "โดยไม่ revert ระหว่างรอบ"
+# ถ้าไม่ล้าง artifact จะสะสมข้ามรอบ - เคสจริง: T1546.004 แก้ /etc/profile.d
+# แล้วทุก shell ที่เกิดหลังจากนั้นยิง tr/awk/hostname ซ้ำนับพันตัว
+# พ่อเป็น login shell ของระบบ ไม่ใช่ลูกหลาน seed -> lineage ตัดสิน benign
+# ผลคือ dataset บวม noise จน malicious ร่วงจาก ~50% เหลือ 11.9%
+atomic_cleanup() {
+    local tech="$1" nums="${2:-}"
+    local arg=""
+    [ -n "$nums" ] && arg="-TestNumbers $nums"
+    echo "  [cleanup] $tech $nums"
+    "${SETSID_WRAP[@]}" timeout --kill-after=15s "${ATOMIC_TIMEOUT}s"         pwsh -NoProfile -Command "
+          Import-Module '/opt/AtomicRedTeam/invoke-atomicredteam/Invoke-AtomicRedTeam.psd1' -Force
+          \$PSDefaultParameterValues = @{'Invoke-AtomicTest:PathToAtomicsFolder'='/opt/AtomicRedTeam/atomics'}
+          Invoke-AtomicTest $tech $arg -Cleanup -ErrorAction SilentlyContinue
+        " </dev/null 2>&1 | tail -3
+    return 0
+}
+
 banner() {
     echo "============================================"
     echo "  SCENARIO: $1"

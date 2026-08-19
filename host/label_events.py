@@ -133,6 +133,89 @@ def label_session(rows, value):
     return {"mal_events": sum(1 for r in rows if r["label"] == "1")}
 
 
+# world-writable path ที่มัลแวร์ชอบวาง payload - ใช้กรอง false positive ของ baseline
+SUSPECT_PATHS = ["/tmp/", "/dev/shm/", "/var/tmp/", "/run/user/"]
+
+
+def load_baseline_images(paths):
+    """อ่าน benign labeled csv -> set ของ Image ที่ยืนยันว่าปกติ"""
+    imgs = set()
+    for p in paths:
+        with open(p, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                im = (r.get("Image") or "").strip()
+                if im:
+                    imgs.add(im)
+    return imgs
+
+
+def label_baseline(rows, baseline_imgs, suspect_only=True):
+    """
+    Differential baseline (opt-in): process ที่ Image ไม่เคยปรากฏใน benign baseline
+    = น่าสงสัย -> label malicious แล้วแพร่ไปลูกหลานเหมือน lineage
+
+    ใช้ได้ดีกับ 'distinct binary' (xmrig, exploit PoC) ที่ benign ไม่มีทางมี
+    ระวัง 'dual-use' (crontab/chmod): ถ้า baseline ไม่ครอบคลุมจะ false positive
+    suspect_only=True จำกัดเฉพาะ Image ที่รันจาก world-writable path เพื่อลด FP
+
+    หมายเหตุ: เรียกหลัง label_lineage เท่านั้น (เสริม ไม่ทับของที่ lineage จับแล้ว)
+    """
+    # เก็บ ProcessGuid ที่ baseline จับได้ใหม่ แล้วแพร่ลงลูกด้วย parent map
+    guid_of_pid, parent_guid, parent_pid, row_guid = {}, {}, {}, defaultdict(list)
+    for r in rows:
+        g = r.get("ProcessGuid", "").strip()
+        p = r.get("ProcessId", "").strip()
+        if g and g != NULL_GUID:
+            row_guid[g].append(r)
+            if p:
+                guid_of_pid[p] = g
+        if r.get("EventID") == "1" and g:
+            pg = r.get("ParentProcessGuid", "").strip()
+            pp = r.get("ParentProcessId", "").strip()
+            if pg and pg != NULL_GUID:
+                parent_guid[g] = pg
+            if pp:
+                parent_pid[g] = pp
+
+    mal = set(r.get("ProcessGuid", "").strip()
+              for r in rows if r.get("label") == "1")
+    seeded = set()
+    for r in rows:
+        if r.get("label") == "1":
+            continue
+        im = (r.get("Image") or "").strip()
+        if not im or im in baseline_imgs:
+            continue
+        if suspect_only and not any(im.startswith(s) for s in SUSPECT_PATHS):
+            continue
+        g = r.get("ProcessGuid", "").strip()
+        if g and g != NULL_GUID:
+            mal.add(g); seeded.add(g)
+
+    # แพร่ลงลูกหลาน
+    changed, rounds = True, 0
+    while changed and rounds < 50:
+        changed = False; rounds += 1
+        for g in list(row_guid.keys()):
+            if g in mal:
+                continue
+            pg = parent_guid.get(g)
+            if (pg and pg in mal) or (parent_pid.get(g) and
+                                      guid_of_pid.get(parent_pid[g]) in mal):
+                mal.add(g); changed = True
+
+    n_new = 0
+    for r in rows:
+        if r.get("label") == "1":
+            continue
+        g = r.get("ProcessGuid", "").strip()
+        if g in mal:
+            r["label"] = "1"
+            r["label_method"] = "baseline"
+            n_new += 1
+    return {"seeded": len(seeded), "new_events": n_new}
+
+
 def leak_report(rows):
     """เตือนคอลัมน์ที่ correlate กับ label แบบสมบูรณ์ (สัญญาณโกง)"""
     labels = set(r.get("label", "") for r in rows)
@@ -175,6 +258,11 @@ def main():
                     help="โฟลเดอร์ที่มัลแวร์ทำงาน เช่น /tmp/mal")
     ap.add_argument("--compare", action="store_true",
                     help="เทียบผล 2 โหมด ไม่เขียนไฟล์")
+    ap.add_argument("--baseline", action="append", default=[],
+                    help="benign labeled csv สำหรับ differential baseline (ใส่ซ้ำได้) "
+                         "- process ที่ Image ไม่เคยเห็นใน benign = malicious")
+    ap.add_argument("--baseline-all-paths", action="store_true",
+                    help="baseline จับทุก path ไม่ใช่แค่ world-writable (เสี่ยง FP สูง)")
     args = ap.parse_args()
 
     with open(args.input, encoding="utf-8") as f:
@@ -208,6 +296,14 @@ def main():
     if args.mode == "session":
         info = label_session(rows, args.label)
         print(f"\n[session] label={args.label} ให้ทุกแถว ({n:,} events)")
+
+    # differential baseline (opt-in, เสริมหลัง lineage)
+    if args.baseline:
+        bimgs = load_baseline_images(args.baseline)
+        binfo = label_baseline(rows, bimgs, suspect_only=not args.baseline_all_paths)
+        scope = "ทุก path" if args.baseline_all_paths else "เฉพาะ world-writable"
+        print(f"\n[baseline] อ่าน {len(bimgs)} benign images จาก {len(args.baseline)} ไฟล์ ({scope})")
+        print(f"[baseline] จับเพิ่ม {binfo['seeded']} process -> +{binfo['new_events']:,} events")
 
     dist = Counter(r["label"] for r in rows)
     print(f"\nสัดส่วน label: " + "  ".join(f"{k}={v:,} ({v/n*100:.1f}%)"

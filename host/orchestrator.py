@@ -101,6 +101,20 @@ SCENARIOS = {
         "seed_cmd": "lab_sandbox",
         "attack": "T1496,T1053.003,T1562.001,T1057",
     },
+    "miner_real": {
+        "script": "miner_real.sh",
+        "label": "lineage",
+        "seed_dir": "/tmp/lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1496,T1105,T1053.003,T1057,T1082",
+    },
+    "exploit_real": {
+        "script": "exploit_real.sh",
+        "label": "lineage",
+        "seed_dir": "/tmp/lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1068,T1003.008,T1136.001,T1548,T1082,T1033",
+    },
 }
 
 

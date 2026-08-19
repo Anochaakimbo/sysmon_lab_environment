@@ -24,7 +24,12 @@ Vagrant.configure("2") do |config|
 
     node.vm.provider "vmware_desktop" do |v|
       v.vmx["displayname"] = "lab-target1"
-      v.memory = 2048
+      # 4096: ทดลองแล้วพบว่า RAM ไม่ใช่สาเหตุของ lineage ขาด (2GB vs 6GB ให้ผล
+      # เท่ากันทุกตัวชี้วัด) ส่วนข้อความ "systemd-sysv-generator: Out of memory"
+      # เป็น error รวมของ systemd ตอน parse ชื่อ unit T1543.002.service ที่มีจุด
+      # ไม่ใช่ RAM หมด (kernel oom-killer = 0 ครั้ง)
+      # เลือก 4096 เป็นทางสายกลาง: มี headroom แต่ snapshot ไม่ช้าเท่า 6144
+      v.memory = 4096
       v.cpus   = 2
       v.gui    = true            # เห็นหน้าจอ VM ตอนบูต (ดีบักง่าย)
 

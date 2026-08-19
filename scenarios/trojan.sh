@@ -13,7 +13,7 @@
 #   T1005     2                   Data from Local System
 #
 # หมายเหตุ: T1059.004 มี 17 tests  ถ้าอยาก event เยอะขึ้นเปลี่ยนเป็น
-#   atomic T1059.004 1,2,3,4,5,6,7,8,9,10   (ใช้เวลานานขึ้น ต้องเพิ่ม --duration)
+#   atomic T1059.004 1,2,3,6,7,8,9,10   (ใช้เวลานานขึ้น ต้องเพิ่ม --duration)
 set -uo pipefail
 source "$(dirname "$0")/_lib.sh"
 banner "trojan"
@@ -23,12 +23,15 @@ STAGE="$SANDBOX/trojan_stage"
 mkdir -p "$STAGE"
 
 # --- Stage 1: recon ระบบและผู้ใช้ ---
-atomic T1082 3,4,5,6,8,12,25,26
+# ตัดจาก 8 tests เหลือ 3: test 6,8,12,25,26 วน xargs/find ยิง grep/gawk/tr
+# หลายพันตัว -> Sysmon for Linux ตามสายเลือดไม่ทัน ParentProcessGuid กลายเป็น
+# null 100% ทำให้ lineage labeling พังทั้งรอบ (วัดแล้ว: ParentImage ว่าง 68%)
+atomic T1082 3,4,5
 atomic T1033 2
 atomic T1057 1
 
 # --- Stage 2: รัน shell command หลายรูปแบบ ---
-atomic T1059.004 1,2,3,4,5
+atomic T1059.004 1,2,3
 
 # --- Stage 3: เก็บข้อมูลจากเครื่อง ---
 atomic T1005 2
@@ -57,6 +60,17 @@ base64 "$STAGE/.hidden_payload.sh" > "$STAGE/payload.b64"
 "$STAGE/.hidden_payload.sh"
 
 # --- ล้าง persistence ที่ atomic test ทิ้งไว้ ---
+# ต้องล้างให้ครบ ไม่ใช่แค่ crontab: orchestrator วนรอบโดยไม่ revert
+# ถ้า profile/.bashrc ที่ T1546.004 แก้ยังค้าง รอบถัดไปจะเจอ process storm
 crontab -r 2>/dev/null || true
+atomic_cleanup T1546.004 1,2,3,4
+atomic_cleanup T1543.002 1,2,3
+atomic_cleanup T1053.003 1,2,3,4
+
+# ตาข่ายรับ เผื่อ cleanup ของ ART ล้างไม่หมด
+rm -f /etc/profile.d/*atomic* /etc/profile.d/*T1546* 2>/dev/null || true
+rm -f /etc/init.d/T1543.002 /etc/systemd/system/art-systemd-service.service 2>/dev/null || true
+rm -f /etc/cron.d/persistevil 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
 
 done_banner "trojan"
