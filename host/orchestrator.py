@@ -115,6 +115,13 @@ SCENARIOS = {
         "seed_cmd": "lab_sandbox",
         "attack": "T1068,T1003.008,T1136.001,T1548,T1082,T1033",
     },
+    "trojan_real": {
+        "script": "trojan_real.sh",
+        "label": "lineage",
+        "seed_dir": "/tmp/lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1071.001,T1059.004,T1003,T1053.003,T1543.002",
+    },
 }
 
 
