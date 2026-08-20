@@ -80,21 +80,60 @@ FILE_COLS = [
     "Device",
 ]
 
+# คอลัมน์เฉพาะ Windows (event ที่ Linux ไม่มี) - ตามเปเปอร์ NLME.csv
+# Linux dataset จะเว้นว่างคอลัมน์เหล่านี้ -> ตอน merge (แนวทาง B) จะถูก drop
+WINDOWS_COLS = [
+    "TargetObject",           # Registry(12/13) + RawAccessRead
+    "EventType",              # Registry + FileDelete
+    "Details",                # RegistrySet(13)
+    "NewName",                # RegistryRename
+    "PreviousCreationUtcTime",  # FileCreateTime(2)
+    "ImageLoaded",            # ImageLoad(7)
+    "Signature",             # ImageLoad/DriverLoad
+    "SignatureStatus",
+    "Signed",
+    "SourceImage",           # ProcessAccess(10)/CreateRemoteThread(8)
+    "SourceProcessGuid",
+    "TargetImage",           # ProcessAccess/CreateRemoteThread
+    "TargetProcessGuid",
+    "GrantedAccess",         # ProcessAccess(10)
+    "CallTrace",
+    "StartAddress",          # CreateRemoteThread(8)
+    "StartFunction",
+    "StartModule",
+    "NewThreadId",
+    "QueryName",             # DnsQuery(22)
+    "QueryStatus",
+    "QueryResults",
+    "PipeName",              # PipeEvent(17/18)
+]
+
 DERIVED_COLS = [
     "parent_known",     # 1 ถ้า ParentProcessGuid ไม่ใช่ all-zero
     "label",            # 0=benign 1=malicious (เติมในขั้น labeling)
 ]
 
-ALL_COLS = META_COLS + COMMON_COLS + PROCESS_COLS + NETWORK_COLS + FILE_COLS + DERIVED_COLS
+ALL_COLS = (META_COLS + COMMON_COLS + PROCESS_COLS + NETWORK_COLS
+            + FILE_COLS + WINDOWS_COLS + DERIVED_COLS)
 
 EVENT_NAMES = {
     "1": "ProcessCreate",
+    "2": "FileCreateTime",       # Windows
     "3": "NetworkConnect",
     "5": "ProcessTerminate",
+    "6": "DriverLoad",           # Windows
+    "7": "ImageLoad",            # Windows
+    "8": "CreateRemoteThread",   # Windows
     "9": "RawAccessRead",
     "10": "ProcessAccess",
     "11": "FileCreate",
+    "12": "RegistryAddDelete",   # Windows
+    "13": "RegistrySetValue",    # Windows
+    "14": "RegistryRename",      # Windows
+    "15": "FileCreateStreamHash",  # Windows
     "16": "SysmonConfigChange",
+    "17": "PipeCreated",         # Windows
+    "18": "PipeConnected",       # Windows
     "22": "DnsQuery",
     "23": "FileDelete",
 }
@@ -102,9 +141,11 @@ EVENT_NAMES = {
 NULL_GUID = "{00000000-0000-0000-0000-000000000000}"
 
 # ---------------------------------------------------------------- regex
-RE_EVENTID = re.compile(r"<EventID>(\d+)</EventID>")
+RE_EVENTID = re.compile(r"<EventID[^>]*>(\d+)</EventID>")  # Windows อาจมี Qualifiers attr
 RE_RECORDID = re.compile(r"<EventRecordID>(\d+)</EventRecordID>")
 RE_COMPUTER = re.compile(r"<Computer>([^<]*)</Computer>")
+# Windows: <TimeCreated SystemTime='2026-...Z'/> ใช้แทน host recv time
+RE_TIMECREATED = re.compile(r"<TimeCreated SystemTime=['\"]([^'\"]+)['\"]")
 RE_FIELD = re.compile(r'Name=["\']([^"\']+)["\']>([^<]*)</Data>')
 RE_FIELD_EMPTY = re.compile(r'Name=["\']([^"\']+)["\']\s*/>')
 
@@ -127,18 +168,28 @@ def clean(val):
     return "" if v == "-" else v
 
 
-def parse_line(line, session):
-    """แปลง 1 บรรทัด -> dict หรือ None ถ้าไม่ใช่ Sysmon event"""
+def parse_line(line, session, platform="linux"):
+    """แปลง 1 บรรทัด -> dict หรือ None ถ้าไม่ใช่ Sysmon event
+    platform: linux = syslog (มี tab prefix) / windows = XML ตรงๆ (จาก export)"""
+    line = line.lstrip("﻿")   # strip BOM (Windows export บรรทัดแรก)
     m_eid = RE_EVENTID.search(line)
     if not m_eid:
         return None
 
-    # แยกส่วน metadata ที่ log_receiver ใส่มา (คั่นด้วย tab)
-    parts = line.split("\t", 2)
-    if len(parts) >= 3:
-        recv_ts, host_ip, payload = parts[0], parts[1], parts[2]
+    if platform == "windows":
+        # Windows export ไม่มี tab prefix - ทั้งบรรทัดคือ XML
+        # ใช้ TimeCreated SystemTime แทน host recv time (ไม่มี syslog)
+        payload = line
+        host_ip = ""
+        m_tc = RE_TIMECREATED.search(payload)
+        recv_ts = m_tc.group(1) if m_tc else ""
     else:
-        recv_ts, host_ip, payload = "", "", line
+        # Linux: <recv_ts>\t<host_ip>\t<payload>
+        parts = line.split("\t", 2)
+        if len(parts) >= 3:
+            recv_ts, host_ip, payload = parts[0], parts[1], parts[2]
+        else:
+            recv_ts, host_ip, payload = "", "", line
 
     row = {c: "" for c in ALL_COLS}
     row["recv_timestamp"] = recv_ts
@@ -178,6 +229,8 @@ def main():
     ap.add_argument("-o", "--output", default="dataset/events.csv")
     ap.add_argument("--session", default=None,
                     help="ชื่อ session (default = ใช้ชื่อไฟล์)")
+    ap.add_argument("--platform", choices=["linux", "windows"], default="linux",
+                    help="linux = syslog / windows = Sysmon Event XML (จาก export)")
     args = ap.parse_args()
 
     # ขยาย wildcard เอง (Windows shell ไม่ทำให้)
@@ -207,7 +260,7 @@ def main():
 
             with open(p, encoding="utf-8", errors="replace") as fin:
                 for line in fin:
-                    row = parse_line(line, session)
+                    row = parse_line(line, session, args.platform)
                     if row is None:
                         stats["skipped"] += 1
                         continue
