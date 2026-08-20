@@ -41,12 +41,8 @@
       <ProcessTerminate onmatch="exclude"/>
     </RuleGroup>
 
-    <!-- ID 7: ImageLoad  [research extra]
-         ⚠️ generate event มหาศาล (ทุก DLL ที่โหลด) - dataset จะใหญ่มาก
-         ถ้า event เยอะเกินไป/ดิสก์ไม่พอ ให้ comment RuleGroup นี้ทิ้ง -->
-    <RuleGroup name="" groupRelation="or">
-      <ImageLoad onmatch="exclude"/>
-    </RuleGroup>
+    <!-- ID 7 ImageLoad: ตัดออก - noise 19% (ทดสอบ benign ได้ 18,619 events),
+         เปเปอร์ NLME ไม่ใช้ event นี้ -->
 
     <!-- ID 8: CreateRemoteThread  [เปเปอร์ - Windows-only, ตัวชี้ injection] -->
     <RuleGroup name="" groupRelation="or">
@@ -58,10 +54,7 @@
       <RawAccessRead onmatch="exclude"/>
     </RuleGroup>
 
-    <!-- ID 10: ProcessAccess  [research extra - ตัวชี้ credential dumping] -->
-    <RuleGroup name="" groupRelation="or">
-      <ProcessAccess onmatch="exclude"/>
-    </RuleGroup>
+    <!-- ID 10 ProcessAccess: ตัดออก - เปเปอร์ NLME ไม่ใช้ (noise) -->
 
     <!-- ID 11: FileCreate  [เปเปอร์ + Linux ร่วม - event หลักของเปเปอร์] -->
     <RuleGroup name="" groupRelation="or">
@@ -75,10 +68,7 @@
       <RegistryEvent onmatch="exclude"/>
     </RuleGroup>
 
-    <!-- ID 22: DnsQuery  [research extra - C2 detection] -->
-    <RuleGroup name="" groupRelation="or">
-      <DnsQuery onmatch="exclude"/>
-    </RuleGroup>
+    <!-- ID 22 DnsQuery: ตัดออก - เปเปอร์ NLME ไม่ใช้ (noise) -->
 
     <!-- ID 23: FileDelete  [Linux ร่วม - เพิ่มเพื่อ merge + indicator removal] -->
     <RuleGroup name="" groupRelation="or">
