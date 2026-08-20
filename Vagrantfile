@@ -53,4 +53,36 @@ Vagrant.configure("2") do |config|
 
   end
 
+  # ---------------------------------------------------------------- Windows 10
+  # เก็บ dataset ฝั่ง Windows เพื่อ merge กับ Linux (แนวทาง B: 6 event ร่วม)
+  # รันทีละเครื่อง (RAM จำกัด) - อย่า `vagrant up` พร้อม target1
+  #   vagrant up wintarget          # บูตเฉพาะ Windows
+  #   vagrant halt wintarget
+  # ⚠️ box Windows ใหญ่ ~15-25GB, license eval 180 วัน
+  config.vm.define "wintarget", autostart: false do |node|
+    node.vm.box          = "gusztavvargadr/windows-10"
+    node.vm.boot_timeout = 900
+    node.vm.communicator = "winrm"
+
+    node.vm.network "private_network", ip: "192.168.56.21"
+
+    node.vm.provider "vmware_desktop" do |v|
+      v.vmx["displayname"] = "lab-wintarget"
+      v.memory = 4096
+      v.cpus   = 2
+      v.gui    = true
+      v.vmx["sound.present"] = "FALSE"
+      v.vmx["usb.present"]   = "FALSE"
+    end
+
+    # ติดตั้ง Sysmon (Windows) + config research + collector agent
+    node.vm.provision "shell",
+      path: "provision/windows/install_sysmon_win.ps1",
+      env: { "HOST_IP" => HOST_IP, "LOG_PORT" => LOG_PORT.to_s }
+
+    # ติดตั้ง PowerShell + Atomic Red Team (Windows tests)
+    node.vm.provision "shell",
+      path: "provision/windows/install_art_win.ps1"
+  end
+
 end

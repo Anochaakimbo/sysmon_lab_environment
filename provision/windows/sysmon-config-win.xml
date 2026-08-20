@@ -1,0 +1,89 @@
+<Sysmon schemaversion="4.90">
+  <!--
+    Sysmon config ฝั่ง Windows — เวอร์ชัน RESEARCH (เก็บ dataset สำหรับ ML)
+
+    ต่างจาก SwiftOnSecurity (reference/sysmonconfig-export.xml) โดยตั้งใจ:
+      SwiftOnSecurity = detection config, onmatch="include" กรองทิ้งเยอะ
+        เก็บเฉพาะที่ "น่าสงสัย" -> benign class หายไป -> dataset bias
+      config นี้ = onmatch="exclude" ว่างเปล่า = log ทุก event ของชนิดนั้น
+        เหมือน provision/sysmon-config.xml ฝั่ง Linux -> coverage ครบ ไม่ bias
+
+    event ที่เปิด อิงเปเปอร์อ้างอิง (Achmad et al. 2025, NLME.csv):
+      เปเปอร์ใช้: 1,2,3,5,8,11,12,13
+      + เพิ่ม 9,23 (RawAccessRead, FileDelete) ให้ตรงกับ Linux -> merge แนวทาง B
+        (event ร่วม 2 platform: 1,3,5,9,11,23)
+      + 7,10,22 (ImageLoad, ProcessAccess, DnsQuery) เผื่อ feature เพิ่ม
+
+    SHA256 = ให้ตรงกับ Linux (คอลัมน์ Hashes) และเปเปอร์
+  -->
+  <HashAlgorithms>SHA256</HashAlgorithms>
+  <CheckRevocation>False</CheckRevocation>
+
+  <EventFiltering>
+
+    <!-- ID 1: ProcessCreate  [เปเปอร์ + Linux ร่วม] -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessCreate onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 2: FileCreateTime  [เปเปอร์] -->
+    <RuleGroup name="" groupRelation="or">
+      <FileCreateTime onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 3: NetworkConnect  [เปเปอร์ + Linux ร่วม] -->
+    <RuleGroup name="" groupRelation="or">
+      <NetworkConnect onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 5: ProcessTerminate  [เปเปอร์ + Linux ร่วม] -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessTerminate onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 7: ImageLoad  [research extra]
+         ⚠️ generate event มหาศาล (ทุก DLL ที่โหลด) - dataset จะใหญ่มาก
+         ถ้า event เยอะเกินไป/ดิสก์ไม่พอ ให้ comment RuleGroup นี้ทิ้ง -->
+    <RuleGroup name="" groupRelation="or">
+      <ImageLoad onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 8: CreateRemoteThread  [เปเปอร์ - Windows-only, ตัวชี้ injection] -->
+    <RuleGroup name="" groupRelation="or">
+      <CreateRemoteThread onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 9: RawAccessRead  [Linux ร่วม - เพิ่มเพื่อ merge] -->
+    <RuleGroup name="" groupRelation="or">
+      <RawAccessRead onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 10: ProcessAccess  [research extra - ตัวชี้ credential dumping] -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessAccess onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 11: FileCreate  [เปเปอร์ + Linux ร่วม - event หลักของเปเปอร์] -->
+    <RuleGroup name="" groupRelation="or">
+      <FileCreate onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 12/13/14: RegistryEvent  [เปเปอร์ - Windows-only, ไม่มีใน Linux]
+         ⚠️ generate เยอะ - แต่เปเปอร์พึ่ง RegistrySet(13) มาก (13,936 rows)
+         จำเป็นถ้าจะ replicate เปเปอร์ -->
+    <RuleGroup name="" groupRelation="or">
+      <RegistryEvent onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 22: DnsQuery  [research extra - C2 detection] -->
+    <RuleGroup name="" groupRelation="or">
+      <DnsQuery onmatch="exclude"/>
+    </RuleGroup>
+
+    <!-- ID 23: FileDelete  [Linux ร่วม - เพิ่มเพื่อ merge + indicator removal] -->
+    <RuleGroup name="" groupRelation="or">
+      <FileDelete onmatch="exclude"/>
+    </RuleGroup>
+
+  </EventFiltering>
+</Sysmon>
