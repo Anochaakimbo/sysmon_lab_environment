@@ -63,6 +63,10 @@ Vagrant.configure("2") do |config|
     node.vm.box          = "gusztavvargadr/windows-10"
     node.vm.boot_timeout = 900
     node.vm.communicator = "winrm"
+    # ART download atomics นาน (~1-2GB) -> เพิ่ม timeout กัน WinRM หลุดกลาง provision
+    node.winrm.timeout       = 1800
+    node.winrm.retry_limit   = 60
+    node.winrm.retry_delay   = 10
 
     node.vm.network "private_network", ip: "192.168.56.21"
 
