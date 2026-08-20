@@ -17,6 +17,7 @@ import csv
 import glob
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -28,7 +29,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Windows console default = cp1252 -> print ภาษาไทย crash; บังคับ utf-8
+# Windows console default = cp1252 -> print ภาษาไทย crash
+# ต้อง set os.environ ก่อน spawn ใดๆ เพื่อให้ทุก child process (collectors +
+# parse/enrich/label ที่ orchestrator เรียก) inherit utf-8 ไม่ crash
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONUTF8"] = "1"
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -67,8 +72,11 @@ def logline(msg):
 
 # ---------------------------------------------------------- collectors
 def _spawn(script, *args):
+    # บังคับ utf-8: collectors print ภาษาไทย ถ้า subprocess inherit cp1252 (Windows)
+    # จะ crash ทันทีตอน print -> ไม่ listen -> log ไม่เข้า (เคยทำ dataset หายทั้งรอบ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     return subprocess.Popen([sys.executable, str(HOST_DIR / script), *args],
-                            cwd=str(HOST_DIR), stdout=subprocess.DEVNULL,
+                            cwd=str(HOST_DIR), env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
 
