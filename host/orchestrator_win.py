@@ -87,8 +87,8 @@ def run(cmd, capture=False, check=True, timeout=None):
 
 # ---- vagrant wrappers ----
 def snapshot_save():    run(["vagrant", "snapshot", "save", VM, CLEAN_SNAPSHOT, "--force"])
-def snapshot_restore(): run(["vagrant", "snapshot", "restore", VM, CLEAN_SNAPSHOT, "--no-provision"])
-def vm_reload():        run(["vagrant", "reload", VM], timeout=600)
+def snapshot_restore(): run(["vagrant", "snapshot", "restore", VM, CLEAN_SNAPSHOT, "--no-provision"], timeout=900)
+def vm_up():            run(["vagrant", "up", VM], timeout=900)
 def vm_halt():          run(["vagrant", "halt", VM], timeout=300)
 
 
@@ -154,13 +154,14 @@ def run_scenario(name, duration_min=5):
     print(f"  SCENARIO : {name}   ({spec['label']})   [Windows]")
     print(f"{'='*58}\n")
 
-    print("[1/6] คืนสภาพ VM -> clean snapshot")
+    print("[1/6] คืนสภาพ VM -> clean snapshot (powered-off)")
     snapshot_restore()
 
-    # VMware HGFS shared folder หลุดตอน revert (snapshot คืน memory state)
-    # reload = reboot -> remount shared folder (C:\vagrant sync ใหม่)
-    print("[2/6] reload VM (remount shared folder หลัง revert)")
-    vm_reload()
+    # snapshot save ตอน VM halt (powered-off) -> restore แล้วต้อง full boot
+    # (snapshot ตอน running ทำ network/winrm ไม่ setup หลัง restore -> fail)
+    # up = boot + network + shared folder setup ใหม่ (เห็น "Enabling shared folders")
+    print("[2/6] up VM (full boot -> network + shared folder setup)")
+    vm_up()
     time.sleep(8)
 
     if not script.exists():
