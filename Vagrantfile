@@ -84,6 +84,10 @@ Vagrant.configure("2") do |config|
       path: "provision/windows/install_sysmon_win.ps1",
       env: { "HOST_IP" => HOST_IP, "LOG_PORT" => LOG_PORT.to_s }
 
+    # ปิด Defender ก่อน (ไม่งั้นลบ real malware ตอน download) - VM isolated เท่านั้น
+    node.vm.provision "shell",
+      path: "provision/windows/disable_defender_win.ps1"
+
     # ติดตั้ง PowerShell + Atomic Red Team (Windows tests)
     node.vm.provision "shell",
       path: "provision/windows/install_art_win.ps1"
