@@ -182,6 +182,31 @@ parse เองตาม indentation ไม่ต้องลง `powershell-yam
 test ที่สั่ง `wevtutil cl` จะ**ลบ event ที่เพิ่งเก็บมาทั้งรอบ** โดยไม่มี error
 เป็นความเสี่ยงที่ฝั่ง Linux ไม่มี (Linux ส่งออก syslog ทันที)
 
+### 🚨 กับดักร้ายที่สุด: ART module import ไม่ติด แล้ว scenario ยัง exit 0
+
+**เกิดจริง 23 ส.ค. 2026 — รัน `trojan_win` แล้วไม่มี atomic test ทำงานเลยสักตัว
+แต่ orchestrator รายงานสำเร็จ, pipeline ครบ, ได้ CSV 18,072 แถว label malicious 59.5%**
+ไม่มีอะไรสะดุดตาเลยถ้าไม่ไล่อ่าน log ทีละบรรทัด
+
+สาเหตุ: `Install-AtomicRedTeam -InstallPath "C:\AtomicRedTeam"` **ไม่ได้วาง module
+ลง `PSModulePath`** module อยู่ที่ `C:\AtomicRedTeam\invoke-atomicredteam\Invoke-AtomicRedTeam.psd1`
+แต่ `_lib.ps1` เรียก `Import-Module Invoke-AtomicRedTeam` ตามชื่อ + `-ErrorAction SilentlyContinue`
+กลืน error ทิ้ง → `Invoke-AtomicTest` ไม่มีอยู่จริง → ทุก `Atomic` เงียบ
+
+แก้แล้วใน `_lib.ps1`:
+- import ตาม path เต็ม (`$ARTRoot` override ด้วย env `ART_ROOT`)
+- `Setup-Sandbox` **throw ทันที** ถ้าไม่เจอ module หรือ import แล้วไม่มี `Invoke-AtomicTest`
+- ส่ง path เข้า `Start-Job` ด้วย (runspace ของ job ไม่เห็นตัวแปรของ scope แม่)
+
+เช็คเร็วๆ ว่ายังดีอยู่ไหม:
+```powershell
+vagrant winrm wintarget -c "Get-Module -ListAvailable Invoke-AtomicRedTeam"   # ว่าง = ปกติ
+vagrant winrm wintarget -c "cd C:\lab_sandbox; . .\_lib.ps1; Setup-Sandbox"  # ต้องขึ้น [setup] ART module พร้อม
+```
+
+**บทเรียนทั่วไป**: ทุกอย่างที่ใช้ `-ErrorAction SilentlyContinue` ในเส้นทางเก็บข้อมูล
+ต้องมี preflight ที่ throw คู่กันเสมอ ไม่งั้นได้ dataset ที่ดูปกติแต่ไม่มีสัญญาณที่ต้องการ
+
 ### Technique ที่ห้ามรันบน Windows (deny list)
 
 ```
@@ -214,6 +239,50 @@ Add-MpPreference -ExclusionPath "C:\AtomicRedTeam"
 Set-MpPreference -DisableRealtimeMonitoring $true
 ```
 **ต้องบันทึกในธีสิสว่าปิดอะไรไป** เพราะกระทบ event ที่เก็บได้
+
+### Registry event กลืน dataset — วัดจริงแล้วต้องกรอง
+
+`sysmon-config-win.xml` ตั้งใจใช้ `onmatch="exclude"` ว่างเพื่อไม่ให้ bias
+แบบ SwiftOnSecurity (ที่ include เฉพาะของน่าสงสัย → benign class หาย)
+แต่บน Windows การเก็บ RegistryEvent ทุกตัวคือท่อน้ำ
+
+**วัดจริง 23 ส.ค. 2026 (`trojan_win` 1 รอบ, ก่อนกรอง):**
+
+| event | จำนวน | สัดส่วน |
+|-------|-------|---------|
+| 12 RegistryAddDelete | 88,447 | 74.5% |
+| 13 RegistrySetValue | 19,895 | 16.7% |
+| 255 (Sysmon error) | 2,838 | 2.4% |
+| 1 ProcessCreate | **370** | **0.3%** |
+
+ที่มาเป็น OS ล้วน: `svchost` 44,582 / `CompatTelRunner` 6,526 / `EdgeUpdate` 6,521
+/ `taskhostw` 6,417 / `MoUsoCoreWorker` 5,471 / `WmiPrvSE` 3,049 / `MsMpEng` 1,791
+
+→ เพิ่ม exclude เฉพาะ **OS housekeeping** ใน `RegistryEvent`
+ไม่ได้กรองตามความน่าสงสัย registry event จาก process ผู้ใช้/ผู้โจมตียังเก็บครบ 100%
+
+⚠️ **ต้องใช้ `condition="is"` path เต็ม ห้ามใช้ `end with` ชื่อไฟล์**
+`T1036.003` test 5 ปลอม powershell เป็นชื่อ `taskhostw.exe` และ test 1 ปลอมเป็น `lsass.exe`
+ถ้ากรองตามชื่อจะกลืน telemetry ของ test ตัวเอง — สำเนาปลอมอยู่คนละ path จึงยังถูก log
+
+**ผลหลังกรอง:** 118,796 → 23,018 events (OS noise หายเกลี้ยง)
+
+### EventID 255 ไม่ใช่ telemetry
+
+`The "C:\Sysmon\" owner is not System. Archiving is disabled.` ยิงทุกครั้งที่มี FileDelete
+(2,838 ครั้ง ≈ จำนวน FileDelete พอดี) field อื่นว่างหมด → `parse_sysmon.py` ตัดทิ้งแล้ว
+
+ไม่แก้ ownership ที่ต้นทางเพราะการแก้จะ **เปิด** archiving = Sysmon ก๊อปทุกไฟล์ที่ถูกลบเก็บไว้
+
+### หลังแก้ config ต้องบันทึก snapshot ใหม่
+
+ไม่ต้อง `vagrant provision` (จะโหลด atomics ใหม่ 1-2GB) ใช้วิธี apply สดแล้ว snapshot:
+```powershell
+vagrant up wintarget
+vagrant winrm wintarget -c "& C:\Sysmon\Sysmon64.exe -c C:\vagrant\provision\windows\sysmon-config-win.xml"
+vagrant halt wintarget
+vagrant snapshot save wintarget clean --force
+```
 
 ### ต้องรัน PowerShell แบบ Administrator
 
@@ -368,6 +437,45 @@ missing pattern ต่างกันชัดมาก — Windows มี `File
 
 → เอนไปทาง **3 หรือ 2** ส่วน 1 เสียของเปล่า
 
+### 6. Harness leakage — ฝั่ง Windows หนักกว่าที่คิด
+
+**วัดจริง 23 ส.ค. 2026 (`trojan_win` รอบสมบูรณ์ หลังกรอง OS noise แล้ว, 23,018 events):**
+
+| event | รวม | benign | malicious |
+|-------|-----|--------|-----------|
+| RegistryAddDelete | 20,356 (88.4%) | 23.2% | **76.8%** |
+| RegistrySetValue | 806 | 65.5% | 34.5% |
+| ProcessCreate | 378 | 23.3% | 76.7% |
+| ProcessTerminate | 375 | 22.4% | 77.6% |
+| FileCreate | 334 | 63.5% | 36.5% |
+| RawAccessRead | 315 | **100%** | **0%** |
+| FileDelete | 298 | 57.7% | 42.3% |
+| NetworkConnect | 150 | **100%** | **0%** |
+| CreateRemoteThread | 4 | 100% | 0% |
+
+**ปัญหาที่ 1 — RegistryAddDelete = 88% ของ dataset และ 76.8% เป็น malicious**
+เจ้าของคือ `powershell.exe` (malicious 15,194 / benign 3,846)
+นี่ไม่ใช่พฤติกรรมมัลแวร์ แต่เป็น **registry churn ของตัว PowerShell เอง**
+(โหลด module, resolve .NET assembly) ซึ่งเกิดเพราะ ART รันทุกอย่างผ่าน PowerShell
+
+→ โมเดลจะเรียน "powershell เขียน registry รัวๆ = malicious" ซึ่งคือการเรียนรู้ **harness**
+ไม่ใช่เรียนรู้มัลแวร์ ได้ F1 สูงปลอมแบบเดียวกับ VM leakage
+
+ทางแก้ที่ต้องลอง (ยังไม่ได้ทำ):
+- ตัด EventID 12 ทิ้ง เหลือ 13 (RegistrySetValue) ซึ่งเปเปอร์ใช้จริงและสมดุลกว่ามาก
+- หรือ downsample event 12 ให้เหลือสัดส่วนใกล้ event อื่น
+- หรือทำ benign scenario ให้รันผ่าน PowerShell เท่าๆ กัน เพื่อให้ churn ไม่ผูกกับ label
+
+**ปัญหาที่ 2 — NetworkConnect / RawAccessRead / CreateRemoteThread malicious = 0%**
+`trojan_win` มี T1059.001 test 8 (mshta download) แต่ไม่มี NetworkConnect ติด label เลย
+แปลว่า test ที่ต้องใช้เน็ตไม่ทำงาน หรือ process ที่ต่อเน็ตไม่ถูกนับเข้า lineage
+**ต้องไล่ก่อนเก็บข้อมูลจริง** ไม่งั้น 3 event type นี้กลายเป็น "benign เสมอ" = leakage ตรงๆ
+
+**ปัญหาที่ 3 — สัดส่วน label แกว่งแรงตาม noise ที่กรอง**
+ก่อนกรอง OS noise: malicious 24.2% / หลังกรอง: **72.8%**
+สัดส่วน label ไม่ใช่คุณสมบัติของ scenario แต่ขึ้นกับว่าเก็บ background noise มาเท่าไหร่
+→ อย่าอ้างตัวเลขนี้ในธีสิสโดยไม่ระบุ config ที่ใช้เก็บ
+
 ---
 
 ## สถานะปัจจุบัน
@@ -396,7 +504,9 @@ missing pattern ต่างกันชัดมาก — Windows มี `File
 4. **Windows: ตั้ง Defender exclusion** ก่อนรัน scenario ใดๆ (โดนทั้ง 5 ตัว ไม่ใช่แค่ miner/ransomware)
 5. ~~Windows: รัน `check_atomics.ps1` แก้เลข test~~ → เสร็จแล้ว 23 ส.ค. 2026
    (ดูตาราง "เลข Atomic test ที่ยืนยันบน Windows VM แล้ว")
-6. **Windows: ทดสอบ `trojan_win.ps1` ตัวเดียวก่อน** แล้วนับ event เทียบฝั่ง Linux
+6. ~~Windows: ทดสอบ `trojan_win.ps1` ตัวเดียว~~ → เสร็จแล้ว 23 ส.ค. 2026
+   23,018 events / enrich 79.9% / lineage malicious 72.8% / atomic ครบ 12 technique + cleanup
+   **แต่เจอ harness leakage ต้องแก้ก่อนเก็บจริง (ดูกับดักข้อ 6)**
 7. ขยายเป็น 5 VM (loop ใน Vagrantfile)
 8. เก็บข้อมูลจริง ≥20,000 events ตามตาราง 15 รอบใน RUNBOOK.md
 9. **เฟส 3**: preprocessing + PCA + เทรน 7 โมเดลตามเปเปอร์

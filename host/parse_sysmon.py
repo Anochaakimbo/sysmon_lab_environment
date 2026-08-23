@@ -197,6 +197,14 @@ def parse_line(line, session, platform="linux"):
     row["session"] = session
 
     eid = m_eid.group(1)
+
+    # EventID 255 = ข้อความ error ภายในของ Sysmon เอง ไม่ใช่ telemetry ของเครื่อง
+    # (23 ส.ค. 2026: 2,838 แถวจาก 118,796 เป็นข้อความ
+    #  'The "C:\Sysmon\\" owner is not System. Archiving is disabled.' ซ้ำๆ
+    #  ยิงทุกครั้งที่มี FileDelete - field อื่นว่างหมด ทำให้ dataset เพี้ยน)
+    if eid == "255":
+        return None
+
     row["EventID"] = eid
     row["event_name"] = EVENT_NAMES.get(eid, f"Unknown_{eid}")
 

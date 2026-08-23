@@ -62,10 +62,47 @@
     </RuleGroup>
 
     <!-- ID 12/13/14: RegistryEvent  [เปเปอร์ - Windows-only, ไม่มีใน Linux]
-         ⚠️ generate เยอะ - แต่เปเปอร์พึ่ง RegistrySet(13) มาก (13,936 rows)
-         จำเป็นถ้าจะ replicate เปเปอร์ -->
+         เปเปอร์พึ่ง RegistrySet(13) มาก (13,936 rows) จำเป็นถ้าจะ replicate
+
+         ⚠️ วัดจริง 23 ส.ค. 2026 (trojan_win 1 รอบ): registry = 108,342/118,796 = 91.2%
+            ส่วน ProcessCreate มีแค่ 370 (0.3%) -> class เดียวกลืน dataset ทั้งก้อน
+            ที่มา: process ระบบของ Windows ล้วน ไม่ใช่ scenario
+              svchost 44,582 / CompatTelRunner 6,526 / EdgeUpdate 6,521
+              taskhostw 6,417 / MoUsoCoreWorker 5,471 / WmiPrvSE 3,049
+              MsMpEng 1,791 / SearchIndexer 1,165 / devicecensus 1,017
+
+         exclude ด้านล่างตัดเฉพาะ "OS housekeeping" ไม่ได้กรองตามความน่าสงสัย
+         -> ต่างจาก SwiftOnSecurity ตรงที่ไม่ทำให้ benign class หาย
+            registry event ที่เกิดจาก process ของผู้ใช้/ผู้โจมตี ยังเก็บครบ 100%
+
+         ⚠️ ใช้ condition="is" path เต็ม ห้ามใช้ end with ชื่อไฟล์
+            เพราะ T1036.003 test 5 ปลอม powershell เป็นชื่อ taskhostw.exe
+            และ test 1 ปลอมเป็น lsass.exe - ถ้ากรองตามชื่อจะกลืน telemetry ของ test เอง
+            สำเนาที่ปลอมชื่ออยู่คนละ path (C:\lab_sandbox, %TEMP%) จึงยังถูก log
+
+         ถ้าต้องการโหมด paper-faithful (เก็บทุก registry event) ให้ลบ RuleGroup นี้
+         แล้วใช้ <RegistryEvent onmatch="exclude"/> ว่างๆ แทน + provision + save-snapshot ใหม่ -->
     <RuleGroup name="" groupRelation="or">
-      <RegistryEvent onmatch="exclude"/>
+      <RegistryEvent onmatch="exclude">
+        <Image condition="is">C:\Windows\System32\svchost.exe</Image>
+        <Image condition="is">C:\Windows\SysWOW64\svchost.exe</Image>
+        <Image condition="is">C:\Windows\System32\CompatTelRunner.exe</Image>
+        <Image condition="is">C:\Windows\System32\taskhostw.exe</Image>
+        <Image condition="is">C:\Windows\System32\MoUsoCoreWorker.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchIndexer.exe</Image>
+        <Image condition="is">C:\Windows\System32\devicecensus.exe</Image>
+        <Image condition="is">C:\Windows\System32\wbem\WmiPrvSE.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchProtocolHost.exe</Image>
+        <Image condition="is">C:\Windows\System32\SearchFilterHost.exe</Image>
+        <Image condition="is">C:\Windows\servicing\TrustedInstaller.exe</Image>
+        <Image condition="is">C:\Windows\WinSxS\TiWorker.exe</Image>
+        <!-- Defender + Edge updater: เลข version อยู่ใน path -> ใช้ end with
+             ทั้งสองตัวไม่ได้เป็นเป้าปลอมชื่อของ scenario ไหน -->
+        <Image condition="end with">\MsMpEng.exe</Image>
+        <Image condition="end with">\MicrosoftEdgeUpdate.exe</Image>
+        <!-- AppContainer virtual registry - ไม่ผูกกับ process ไหนที่ตามรอยได้ -->
+        <TargetObject condition="begin with">\REGISTRY\A\</TargetObject>
+      </RegistryEvent>
     </RuleGroup>
 
     <!-- ID 22 DnsQuery: ตัดออก - เปเปอร์ NLME ไม่ใช้ (noise) -->
