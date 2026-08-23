@@ -551,11 +551,27 @@ T1074.001   C:\lab_sandbox\trojan_stage\collected.zip
 
 ### ที่ยังต้องแก้ก่อนเก็บจริง
 
-1. ~~NetworkConnect malicious = 0%~~ → **หาสาเหตุเจอแล้ว 23 ส.ค. 2026: Windows Defender**
-   ไม่ใช่ปัญหา lineage และไม่ใช่ VM ต่อเน็ตไม่ได้ (ทดสอบแล้วได้ HTTP 200)
-   Defender บล็อก command line ของ test ที่โหลดไฟล์ทุกตัว เพราะ Tamper Protection
-   ทำให้ provisioner ปิด Defender ไม่ลง — ดูหัวข้อ "Windows Defender จะขวางการเก็บข้อมูล"
-   **ต้องปิด Tamper Protection ด้วยมือก่อน แล้ว provision + snapshot ใหม่ แล้วเก็บใหม่**
+1. ~~NetworkConnect malicious = 0%~~ → **แก้แล้วและยืนยันแล้ว 23 ส.ค. 2026**
+   สาเหตุคือ Windows Defender ไม่ใช่ lineage และไม่ใช่ VM ต่อเน็ตไม่ได้ (ทดสอบได้ HTTP 200)
+   หลังปิด Tamper Protection + provision + snapshot ใหม่ แล้วเก็บซ้ำ:
+
+   | | Defender เปิด | Defender ปิด |
+   |---|---|---|
+   | NetworkConnect รวม | 77 | 121 |
+   | NetworkConnect malicious | **0** | **6** |
+   | events รวม | 1,776 | 1,894 |
+   | FileCreate %mal | 46.2% | 56.4% |
+
+   6 แถวที่ได้คือ telemetry จริงของ T1059.001 ที่เคยหายทั้งหมด:
+   ```
+   powershell.exe -> 185.199.109-111.133:443   (raw.githubusercontent.com CDN)
+   mshta.exe      -> 104.18.21.213:80 / 23.50.237.120:80
+   ```
+   ตรงกับ test 5 (DownloadString), 7 (XmlDocument.Load), 8 (mshta download) พอดี
+
+   ⚠️ ยังไม่เท่าเปเปอร์ (100% mal จาก 20 แถว) เพราะ `trojan_win` มี test ที่แตะเน็ตแค่ 3 ตัว
+   ส่วน benign 108 แถวเป็น DNS ของ `svchost` — ตัวที่ออกแบบมาเก็บ network telemetry
+   คือ `botnet_win` (beacon 30 รอบ) ซึ่งต้องเปิด `host/c2_server.py` ก่อนรัน
 2. **FileCreate 15.0% เทียบเปเปอร์ 39.0%** — เปเปอร์เก็บ FileCreate เยอะกว่ามาก
    อาจเพราะ sample มัลแวร์จริงเขียนไฟล์เยอะกว่า ART test
 3. **ProcessTerminate 20.1% เทียบเปเปอร์ 2.1%** — เปเปอร์แทบไม่มี event 5
@@ -627,9 +643,10 @@ T1074.001   C:\lab_sandbox\trojan_stage\collected.zip
 1. ~~FileCreate หาย~~ → แก้แล้ว (`restart sysmon` หลังบูต)
 2. ~~malicious % ต่ำ~~ → ปิดแล้ว 30.9%
 3. ~~process ถาม password ค้าง~~ → แก้โค้ดแล้ว รอยืนยันบน VM จริง
-4. **Windows: ปิด Tamper Protection ด้วยมือ** แล้ว `vagrant provision` + `snapshot save` ใหม่
-   จนกว่าจะทำ `Setup-Sandbox` จะ throw ไม่ยอมให้เก็บข้อมูล (ตั้งใจให้เป็นแบบนั้น)
-   exclusion path อย่างเดียวไม่พอ — ตัวที่บล็อกคือ AMSI/command-line scanning
+4. ~~Windows: ปิด Tamper Protection~~ → เสร็จแล้ว 23 ส.ค. 2026
+   `RealTimeProtectionEnabled = False`, `IsTamperProtected = False` ใน snapshot `clean`
+   ยืนยันด้วย `_diag_defender.ps1` และ NetworkConnect malicious กลับมา
+   **dataset ทุกชุดที่เก็บก่อนหน้านี้ใช้ไม่ได้ ต้องเก็บใหม่ทั้ง 5 scenario**
 5. ~~Windows: รัน `check_atomics.ps1` แก้เลข test~~ → เสร็จแล้ว 23 ส.ค. 2026
    (ดูตาราง "เลข Atomic test ที่ยืนยันบน Windows VM แล้ว")
 6. ~~Windows: ทดสอบ `trojan_win.ps1` ตัวเดียว~~ → เสร็จแล้ว 23 ส.ค. 2026
