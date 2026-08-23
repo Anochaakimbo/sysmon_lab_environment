@@ -13,11 +13,25 @@ c2_server.py - เซิร์ฟเวอร์ C2 จำลอง (รัน�
 ใช้งาน:
     python c2_server.py
 """
+import os
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
+
+# บังคับ utf-8 (เหมือน orchestrator_win.py / dashboard.py)
+# ไม่งั้น print ภาษาไทยลง console cp1252 แล้ว process ตายทันที
+# 23 ส.ค. 2026: c2_server ตกหล่นตัวนี้ -> ล้มตอนสตาร์ท พอร์ต 8080/4444 ไม่ขึ้น
+# ผลคือ botnet_win/miner_win จะ beacon ไม่ติดโดยดูเหมือน scenario ทำงานปกติ
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONUTF8"] = "1"
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 # ชุดคำสั่งที่ attacker ส่งเข้า reverse shell หลัง backdoor connect กลับ
 # = post-exploitation จริง (recon + credential access + discovery)
