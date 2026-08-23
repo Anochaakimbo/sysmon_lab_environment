@@ -231,13 +231,59 @@ T1491  Defacement
 | `exploit_win.ps1` (T1055/T1548.002) | process injection + UAC bypass โดนแน่ |
 | `Atomic ... -GetPrereqs` | ตัวโหลด prereq เองก็โดนบล็อกได้ ทำให้ test fail เงียบ |
 
-แก้ (รันตอน provision, ต้อง Administrator):
-```powershell
-Add-MpPreference -ExclusionPath "C:\lab_sandbox"
-Add-MpPreference -ExclusionPath "C:\AtomicRedTeam"
-# ถ้ายังโดนบล็อก (VM revert ได้อยู่แล้ว):
-Set-MpPreference -DisableRealtimeMonitoring $true
+#### 🚨 Tamper Protection ทำให้ปิด Defender ไม่ลง และมันพังแบบเงียบ
+
+**เกิดจริง 23 ส.ค. 2026** — `disable_defender_win.ps1` รันตอน provision ครบทุกบรรทัด
+ไม่มี error แต่ `Get-MpComputerStatus` บอกว่า:
+
 ```
+RealTimeProtectionEnabled : True
+IsTamperProtected         : True
+BehaviorMonitorEnabled    : True
+```
+
+**Tamper Protection ย้อน `Set-MpPreference -Disable*` ทุกตัวกลับเงียบๆ**
+(`Add-MpPreference -ExclusionPath` ยังติด แต่ช่วยไม่ได้ — ดูด้านล่าง)
+
+ผลที่ตามมา วัดจาก `Get-MpThreatDetection`: Defender บล็อก command line ของ
+
+| test | ThreatID |
+|------|----------|
+| `T1059.001-5` Invoke-AppPathBypass (DownloadString) | 2147726248 |
+| `T1059.001-7` Powershell XML requests (XmlDocument.Load) | 2147849223 |
+| `T1074.001` Discovery.bat download | 2147849223 |
+
+ซึ่งคือ **test ที่โหลดไฟล์ทั้งหมด = test ที่จะสร้าง NetworkConnect**
+→ `trojan_win` เก็บ NetworkConnect ที่เป็น malicious ได้ **0 แถว** จาก 77 แถว
+(ที่เหลือเป็น OS ล้วน: svchost DNS, Defender, WinRM)
+ทั้งที่ ART รายงาน `Done executing test` ครบทุกตัว
+
+⚠️ **`Add-MpPreference -ExclusionPath` แก้ปัญหานี้ไม่ได้**
+exclusion กันแค่การสแกน **ไฟล์** แต่ตัวที่บล็อกคือ **AMSI / command-line scanning**
+ซึ่งดูที่ข้อความคำสั่ง ไม่ได้ดู path
+
+#### วิธีแก้ (ทำมือครั้งเดียว — ปิดผ่านสคริปต์/registry ไม่ได้)
+
+Tamper Protection ปิดได้ทางเดียวคือ GUI (Microsoft กันไว้ตั้งแต่ปี 2020)
+Vagrantfile ตั้ง `v.gui = true` อยู่แล้ว เปิดหน้าจอ VM ได้เลย
+
+```
+1. Windows Security > Virus & threat protection > Manage settings
+2. ปิด Tamper Protection
+3. บนโฮสต์:
+     vagrant provision wintarget      # ให้ disable_defender_win.ps1 ทำงานจริง
+     vagrant halt wintarget
+     vagrant snapshot save wintarget clean --force
+```
+
+#### preflight กันพลาดซ้ำ
+
+`Setup-Sandbox` เรียก `Assert-DefenderOff` แล้ว — **throw ทันที**ถ้า
+`RealTimeProtectionEnabled = True` พร้อมพิมพ์ขั้นตอนแก้ให้
+ตั้ง `$env:ALLOW_DEFENDER = "1"` ถ้าจงใจจะเก็บทั้งที่ Defender เปิด
+
+ตรวจเร็วๆ: `vagrant winrm wintarget -c "powershell -File C:\vagrant\scenarios_win\_diag_defender.ps1"`
+
 **ต้องบันทึกในธีสิสว่าปิดอะไรไป** เพราะกระทบ event ที่เก็บได้
 
 ### Registry event กลืน dataset — วัดจริงแล้วต้องกรอง
@@ -505,9 +551,11 @@ T1074.001   C:\lab_sandbox\trojan_stage\collected.zip
 
 ### ที่ยังต้องแก้ก่อนเก็บจริง
 
-1. **NetworkConnect malicious = 0%** (77 แถว benign ล้วน) ทั้งที่เปเปอร์ = 100%
-   `trojan_win` มี T1059.001 test 8 (mshta download) แต่ไม่ติด lineage
-   → ถ้าปล่อยไว้ event type นี้กลายเป็น "benign เสมอ" = leakage ตรงๆ
+1. ~~NetworkConnect malicious = 0%~~ → **หาสาเหตุเจอแล้ว 23 ส.ค. 2026: Windows Defender**
+   ไม่ใช่ปัญหา lineage และไม่ใช่ VM ต่อเน็ตไม่ได้ (ทดสอบแล้วได้ HTTP 200)
+   Defender บล็อก command line ของ test ที่โหลดไฟล์ทุกตัว เพราะ Tamper Protection
+   ทำให้ provisioner ปิด Defender ไม่ลง — ดูหัวข้อ "Windows Defender จะขวางการเก็บข้อมูล"
+   **ต้องปิด Tamper Protection ด้วยมือก่อน แล้ว provision + snapshot ใหม่ แล้วเก็บใหม่**
 2. **FileCreate 15.0% เทียบเปเปอร์ 39.0%** — เปเปอร์เก็บ FileCreate เยอะกว่ามาก
    อาจเพราะ sample มัลแวร์จริงเขียนไฟล์เยอะกว่า ART test
 3. **ProcessTerminate 20.1% เทียบเปเปอร์ 2.1%** — เปเปอร์แทบไม่มี event 5
@@ -579,7 +627,9 @@ T1074.001   C:\lab_sandbox\trojan_stage\collected.zip
 1. ~~FileCreate หาย~~ → แก้แล้ว (`restart sysmon` หลังบูต)
 2. ~~malicious % ต่ำ~~ → ปิดแล้ว 30.9%
 3. ~~process ถาม password ค้าง~~ → แก้โค้ดแล้ว รอยืนยันบน VM จริง
-4. **Windows: ตั้ง Defender exclusion** ก่อนรัน scenario ใดๆ (โดนทั้ง 5 ตัว ไม่ใช่แค่ miner/ransomware)
+4. **Windows: ปิด Tamper Protection ด้วยมือ** แล้ว `vagrant provision` + `snapshot save` ใหม่
+   จนกว่าจะทำ `Setup-Sandbox` จะ throw ไม่ยอมให้เก็บข้อมูล (ตั้งใจให้เป็นแบบนั้น)
+   exclusion path อย่างเดียวไม่พอ — ตัวที่บล็อกคือ AMSI/command-line scanning
 5. ~~Windows: รัน `check_atomics.ps1` แก้เลข test~~ → เสร็จแล้ว 23 ส.ค. 2026
    (ดูตาราง "เลข Atomic test ที่ยืนยันบน Windows VM แล้ว")
 6. ~~Windows: ทดสอบ `trojan_win.ps1` ตัวเดียว~~ → เสร็จแล้ว 23 ส.ค. 2026
