@@ -443,6 +443,44 @@ T1547.001 1,2,8,9,11 T1548.002 1,3,5,7,9  T1552.001 4,5,13,14
 
 ---
 
+### ตรวจ scenario ก่อนเก็บข้อมูลทุกครั้ง
+
+```powershell
+python host/check_scenarios.py        # static check, exit 1 ถ้าเจอปัญหา
+```
+
+ตรวจ 6 อย่างที่เคยพลาดมาแล้วจริงในโปรเจคนี้:
+
+1. `.ps1` เป็น UTF-8 with BOM (ไม่งั้น PowerShell 5.1 อ่านคอมเมนต์ไทยเพี้ยน)
+2. ไม่มี `Atomic "T####"` ที่ลืมใส่เลข (= รันทุก test ของ technique นั้น)
+3. ไม่มี technique ใน deny list
+4. **cleanup ครบทุก technique ที่ทิ้ง artifact และเลขตรงกับตอนเรียก**
+   (ไม่ใช่แค่ persistence — T1105 โหลดไฟล์, T1074.001 staging, T1552.001 ไฟล์ credential ล่อ)
+5. เลข test มีจริงและไม่ติด flag — cross-check กับ `atomic_report_win.txt`
+6. ทุกไฟล์อยู่ใน `SCENARIOS` ของ `orchestrator_win`
+
+**ผลล่าสุด 24 ส.ค. 2026: ผ่านทั้งหมด** (131 เลข test, 6 ไฟล์)
+
+| ไฟล์ | Atomic | Cleanup |
+|------|--------|---------|
+| `benign.ps1` | 0 | 0 |
+| `botnet_win.ps1` | 6 | 2 |
+| `exploit_win.ps1` | 9 | 6 |
+| `miner_win.ps1` | 5 | 3 |
+| `ransomware_win.ps1` | 5 | 2 |
+| `trojan_win.ps1` | 12 | 6 |
+
+### error ใน log ที่ไม่ใช่ข้อบกพร่อง
+
+`PathNotFound` / `Cannot find path` จำนวนหนึ่งเป็นเรื่องปกติ ตัวหลักคือ
+`T1012-2 Query Registry with Powershell cmdlets` ที่อ่าน registry key ซึ่ง
+Windows 10 Enterprise Evaluation สะอาดๆ ไม่มี
+
+เป็นพฤติกรรมปกติของ discovery test ที่ค้นแล้วไม่เจอ และยังสร้าง ProcessCreate
+telemetry ตามที่ต้องการ **แต่ให้ telemetry น้อยกว่าที่จะได้บนเครื่องที่ใช้งานจริง**
+
+---
+
 ## ผลตรวจ scenario ฝั่ง Windows ครบทั้ง 6 (24 ส.ค. 2026)
 
 เก็บด้วยเงื่อนไขเดียวกันหมด: Defender ปิด (Tamper Protection ปิดแล้ว), repeat loop,
