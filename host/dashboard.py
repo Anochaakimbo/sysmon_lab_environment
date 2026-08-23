@@ -208,11 +208,17 @@ def run_merge():
         logline(f"[merge] ล้ม: {e}")
 
 
-def save_snapshot_bg():
+def save_snapshot_bg(platform="linux"):
+    # snapshot ต้องยิงเข้า VM ที่ตรงกับแท็บที่ผู้ใช้เปิดอยู่
+    # ไม่งั้นกดจากหน้า Windows แล้วไป snapshot target1 ของ Linux แทน
     STATE.update(job="snapshot", phase="running")
     try:
-        orch.snapshot_save("target1")
-        logline("[snapshot] บันทึก clean snapshot แล้ว")
+        if platform == "windows":
+            orch_win.snapshot_save()
+            logline(f"[snapshot] บันทึก clean snapshot ของ {orch_win.VM} แล้ว")
+        else:
+            orch.snapshot_save("target1")
+            logline("[snapshot] บันทึก clean snapshot ของ target1 แล้ว")
         STATE["phase"] = "done"
     except Exception as e:  # noqa
         STATE["phase"] = "error"
@@ -305,7 +311,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/snapshot":
             if busy():
                 return self._send(409, json.dumps({"error": "มี job รันอยู่"}))
-            threading.Thread(target=save_snapshot_bg, daemon=True).start()
+            plat = body.get("platform", "linux")
+            threading.Thread(target=save_snapshot_bg, args=(plat,),
+                             daemon=True).start()
             return self._send(200, json.dumps({"ok": True}))
         return self._send(404, json.dumps({"error": "not found"}))
 
@@ -346,11 +354,20 @@ th{color:var(--mut);font-weight:500}
 .stat{font-size:26px;font-weight:700}.stat small{font-size:13px;color:var(--mut);font-weight:400}
 .full{grid-column:1/3}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.tabs{display:flex;gap:6px;margin-left:auto}
+.tab{padding:7px 16px;border-radius:8px 8px 0 0;border:1px solid var(--border);
+     border-bottom:none;background:var(--bg);color:var(--mut);cursor:pointer;font-size:14px}
+.tab.on{background:var(--panel);color:#fff;font-weight:600}
+.tab:hover{color:#fff}
 </style></head><body>
 <header>
-  <h1>🛡️ Sysmon for Linux — Lab Dashboard</h1>
+  <h1 id="title">🛡️ Sysmon Lab Dashboard</h1>
   <span class="badge" id="vmstate"><span class="dot" style="background:#666"></span>...</span>
   <span class="badge" id="jobstate">idle</span>
+  <div class="tabs">
+    <div class="tab" id="tab-linux" onclick="setPlat('linux')">🐧 Linux</div>
+    <div class="tab" id="tab-windows" onclick="setPlat('windows')">🪟 Windows</div>
+  </div>
 </header>
 <div class="wrap">
   <div class="panel">
@@ -361,9 +378,7 @@ th{color:var(--mut);font-weight:500}
     </div>
     <div id="scbtns"></div>
     <div class="ctl" style="margin-top:14px;flex-wrap:wrap">
-      <button onclick="selectSet(CLEAN_LINUX)">✓ ชุด Linux (6)</button>
-      <button onclick="selectSet(CLEAN_WIN)">✓ ชุด Windows (6)</button>
-      <button onclick="selectSet(CLEAN)">✓ ทั้งสองฝั่ง (12)</button>
+      <button onclick="selectSet(cleanSet())" id="cleanbtn">✓ เลือกชุดสะอาด</button>
       <button onclick="selectSet([])">✗ ล้าง</button>
       <button onclick="runBatch()" id="batchbtn" class="run">▶ เก็บทั้งชุดที่เลือก</button>
     </div>
@@ -396,33 +411,46 @@ const CLEAN=CLEAN_LINUX.concat(CLEAN_WIN);
 let scenarios=[];
 async function j(u,m,b){const r=await fetch(u,{method:m||'GET',
   headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return r.json()}
-async function loadSc(){scenarios=await j('/api/scenarios');
-  // แยกกลุ่มตาม platform - RAM 32GB รันได้ทีละ VM อยู่แล้ว
-  // ถ้าปนกันจะกดข้ามฝั่งโดยไม่ตั้งใจ แล้วเสียเวลา revert+boot ผิดเครื่อง
-  const row=s=>{
-    const benign=s.name.startsWith('benign');
-    return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
-      <input type="checkbox" class="scchk" value="${s.name}" ${CLEAN.includes(s.name)?'checked':''}>
-      <button class="run" style="flex:1;text-align:left" onclick="run('${s.name}')" title="${s.attack||'(no attack listed)'}">
-        ${benign?'🟢':'🔴'} ${s.name}</button></div>`};
-  const grp=(title,plat)=>{
-    const rows=scenarios.filter(s=>s.platform===plat);
-    if(!rows.length)return '';
-    return `<div style="margin:10px 0 4px;font-weight:600;opacity:.75">${title} (${rows.length})</div>`
-      + rows.map(row).join('')};
-  $('#scbtns').innerHTML = grp('🐧 Linux — VM target1','linux')
-                         + grp('🪟 Windows — VM wintarget','windows')}
+// แท็บ platform - RAM 32GB รันได้ทีละ VM อยู่แล้ว การแยกหน้าจึงตรงกับวิธีทำงานจริง
+// และกันกดข้ามฝั่งโดยไม่ตั้งใจ (เสียเวลา revert+boot ผิดเครื่องราว 10 นาที)
+let PLAT = localStorage.getItem('plat') || 'linux';
+const VM_OF = {linux:'target1', windows:'wintarget'};
+function cleanSet(){return PLAT==='windows'?CLEAN_WIN:CLEAN_LINUX}
+
+function setPlat(p){
+  PLAT=p; localStorage.setItem('plat',p);
+  $('#tab-linux').className='tab'+(p==='linux'?' on':'');
+  $('#tab-windows').className='tab'+(p==='windows'?' on':'');
+  $('#title').textContent=(p==='windows'?'🪟 Windows':'🐧 Linux')+' — Sysmon Lab Dashboard';
+  $('#cleanbtn').textContent=`✓ เลือกชุดสะอาด (${cleanSet().length})`;
+  $('#at').disabled = (p==='windows');   // ฝั่ง Windows ใช้ env ATOMIC_TIMEOUT ใน _lib.ps1
+  renderSc();
+}
+
+function renderSc(){
+  const rows=scenarios.filter(s=>s.platform===PLAT);
+  if(!rows.length){$('#scbtns').innerHTML='<div style="color:var(--mut)">ไม่มี scenario</div>';return}
+  const clean=cleanSet();
+  $('#scbtns').innerHTML=`<div style="margin:2px 0 8px;color:var(--mut);font-size:12px">
+      VM: <b>${VM_OF[PLAT]}</b> — ${rows.length} scenario</div>`
+    + rows.map(s=>{
+      const benign=s.name.startsWith('benign');
+      return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+        <input type="checkbox" class="scchk" value="${s.name}" ${clean.includes(s.name)?'checked':''}>
+        <button class="run" style="flex:1;text-align:left" onclick="run('${s.name}')" title="${s.attack||'(no attack listed)'}">
+          ${benign?'🟢':'🔴'} ${s.name}</button></div>`}).join('')}
+
+async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT)}
 function selected(){return[...document.querySelectorAll('.scchk:checked')].map(c=>c.value)}
 function selectSet(set){document.querySelectorAll('.scchk').forEach(c=>c.checked=set.includes(c.value))}
 async function run(name){await j('/api/run','POST',
   {scenario:name,duration:+$('#dur').value,atomic_timeout:+$('#at').value})}
 async function runBatch(){const s=selected();if(!s.length)return alert('เลือก scenario ก่อน');
-  const plats=[...new Set(s.map(n=>(scenarios.find(x=>x.name===n)||{}).platform))];
-  if(plats.length>1&&!confirm('คิวนี้มีทั้ง Linux และ Windows\nจะสลับ VM ไปมา ใช้เวลานานขึ้นมาก\n\nไปต่อ?'))return;
   if(!confirm(`เก็บ ${s.length} scenario เรียงกัน?\n${s.join(', ')}\n\nใช้เวลา ~${s.length*13} นาที`))return;
   await j('/api/run_batch','POST',{scenarios:s,duration:+$('#dur').value,atomic_timeout:+$('#at').value})}
 async function merge(){await j('/api/merge','POST',{})}
-async function snap(){await j('/api/snapshot','POST',{})}
+async function snap(){if(!confirm(`บันทึก clean snapshot ของ VM ${VM_OF[PLAT]} ?`))return;
+  await j('/api/snapshot','POST',{platform:PLAT})}
 async function tick(){
   const st=await j('/api/state');
   const busy=st.busy;
