@@ -278,9 +278,53 @@ exploit_win    : T1069.001 T1012 T1497.001 T1552.001 T1548.002 T1134 T1055 T1218
 รายการนี้ **ต้องตรงกับ `$SCENARIOS` ใน `check_atomics.ps1`** — แก้ scenario แล้วแก้ checker ด้วย
 ไม่งั้น checker จะไม่ออกบรรทัดพร้อมวางให้ technique ที่เพิ่มใหม่
 
-⚠️ **เลข test ในไฟล์ยังเป็นค่าเดา (`"1,2"`) ทั้งหมด — ยังไม่เคยรันกับ atomics จริง**
-host ไม่มี `C:\AtomicRedTeam` ต้องรัน `check_atomics.ps1` ใน VM แล้วเอาผลมาแทน
-technique ที่มี test เดียวต้องเป็น `"1"` ไม่งั้น error
+### เลข Atomic test ที่ยืนยันบน Windows VM แล้ว (23 ส.ค. 2026)
+
+รันจาก `check_atomics.ps1` บน `wintarget` (ART 342 technique folder) แล้ว cross-check ครบ 202 เลข
+
+```
+T1005 1              T1012 1,2,3,6        T1016 1,2,4,9
+T1018 1,4,5          T1027 2,3,7,11       T1033 1,4,5,6
+T1036.003 1,3,5,7    T1049 1,2,3          T1053.005 2,4,7,9
+T1055 3,4,6,7,11     T1057 2,3,4,5,6      T1059.001 5,7,8
+T1069.001 2,3,5,6    T1070.004 4,5,6,7,10 T1071.001 1
+T1074.001 1,3        T1082 1,7,9,11,27,35 T1083 1,2,5,9
+T1087.001 8,9,10     T1105 7,9,10,15,16,25
+T1112 1,6,7,40,41    T1132.001 3          T1134.001 1,2
+T1134.002 1          T1218.011 2,3,9,13,15
+T1486 5,8,10         T1496 2              T1497.001 3,5
+T1547.001 1,2,8,9,11 T1548.002 1,3,5,7,9  T1552.001 4,5,13,14
+```
+
+**สิ่งที่ค่าเดาเดิมพลาด** (ถ้าไม่รัน checker จะ fail เงียบทั้งหมด):
+
+| เดาไว้ | ของจริง |
+|--------|---------|
+| `T1496 "1,2"` | มี windows test เดียวคือ **เลข 2** — test 1 เป็น Linux |
+| `T1132.001 "1"` | windows test คือ **เลข 3** |
+| `T1134 "1,2"` | **ART ไม่มีโฟลเดอร์ `T1134` เปล่าๆ** มีแต่ `.001/.002/.004/.005` |
+| `T1486 "1,2"` | windows test คือ 5,8,9,10 |
+| `T1070.004 "1,2"` | windows test เริ่มที่เลข 4 |
+| `T1087.001 "1,2"` | windows test เริ่มที่เลข 8 |
+
+**เกณฑ์ที่ใช้เลือก** (ไม่ได้เอาทุก test ที่รันได้ — T1112 มีถึง 90 ตัว):
+
+1. เลี่ยง test ที่มี `[prereq]` ซึ่งดาวน์โหลดเครื่องมือจากเน็ต
+   (WinPwn, UACME, Adfind, SharpHound, Mimikatz, BloodHound, Process Hacker, NSudo)
+   — ช้า, Defender บล็อก, และพังทั้ง scenario ถ้าเน็ตไม่มี
+2. เลี่ยง test ที่ต้องมี Active Directory (`nltest`, `net group Domain Computers`, PowerView)
+   — VM เป็น workgroup จะ fail
+3. เลี่ยง test ที่ทำ VM ใช้งานไม่ได้ — `T1112` ที่ปิด cmd/regedit/taskmgr/Defender,
+   `T1547.001` 14/15/17 ที่แก้ Winlogon Userinit / Shell / BootExecute (เสี่ยงบูตไม่ขึ้น)
+4. เลือก 3-6 ตัวต่อ technique ให้จบใน `$AtomicTimeout` 240s
+5. เอาทั้ง `command_prompt` และ `powershell` ปนกัน ให้ได้ ProcessCreate หลากหลาย
+
+⚠️ **`T1486` test 9 (DiskCryptor) ตัดออกด้วยมือ ไม่ใช่ checker จับได้**
+มันติดตั้ง driver เข้ารหัสทั้ง volume — keyword scan ไม่โดนเพราะ command ไม่มีคำที่สแกนไว้
+บทเรียน: **checker ช่วยกรอง ไม่ได้แทนการอ่านชื่อ test เอง**
+
+⚠️ `T1486` test 8 (GPG4Win) ต้องโหลด+ติดตั้งผ่านเน็ต ใช้เวลาราว 1-2 นาที
+ถ้าอยากให้ ransomware scenario เร็วขึ้นและไม่พึ่งเน็ต ให้เหลือ `"5,10"`
 
 ---
 
@@ -339,6 +383,7 @@ missing pattern ต่างกันชัดมาก — Windows มี `File
 - ART ติดตั้งแล้ว รัน `Invoke-AtomicTest` ได้
 - `_lib.ps1` + `benign.ps1` + `ransomware_win.ps1` + `miner_win.ps1`
 - `trojan_win.ps1` + `botnet_win.ps1` + `exploit_win.ps1` (ART-driven)
+- เลข test ยืนยันกับ ART จริงบน VM แล้วครบทั้ง 5 scenario (202 เลข cross-check ผ่าน)
 - `check_atomics.ps1` เขียนแล้ว — ทดสอบ parser ผ่าน fixture ครบทุกเคสยาก
   (decoy `supported_platforms` ในบล็อก description, test ที่ไม่ใช่ Windows แต่ index ต้องไม่เลื่อน,
   `input_arguments` ที่มี key ชื่อ `name`, executor `manual`, vssadmin/wevtutil)
@@ -349,9 +394,8 @@ missing pattern ต่างกันชัดมาก — Windows มี `File
 2. ~~malicious % ต่ำ~~ → ปิดแล้ว 30.9%
 3. ~~process ถาม password ค้าง~~ → แก้โค้ดแล้ว รอยืนยันบน VM จริง
 4. **Windows: ตั้ง Defender exclusion** ก่อนรัน scenario ใดๆ (โดนทั้ง 5 ตัว ไม่ใช่แค่ miner/ransomware)
-5. **Windows: รัน `check_atomics.ps1` ใน VM** แล้วเอาบล็อก PASTE มาแทนเลข test
-   ทั้ง 5 scenario — ตอนนี้เป็นค่าเดา `"1,2"` ทั้งหมด **ยังไม่เคยตรวจกับ atomics จริง**
-   ถ้าเลขเกินจำนวน test ที่มี `Invoke-AtomicTest` จะ error แล้วได้ event ขาดโดยไม่รู้ตัว
+5. ~~Windows: รัน `check_atomics.ps1` แก้เลข test~~ → เสร็จแล้ว 23 ส.ค. 2026
+   (ดูตาราง "เลข Atomic test ที่ยืนยันบน Windows VM แล้ว")
 6. **Windows: ทดสอบ `trojan_win.ps1` ตัวเดียวก่อน** แล้วนับ event เทียบฝั่ง Linux
 7. ขยายเป็น 5 VM (loop ใน Vagrantfile)
 8. เก็บข้อมูลจริง ≥20,000 events ตามตาราง 15 รอบใน RUNBOOK.md
@@ -376,6 +420,10 @@ python host\orchestrator.py --list
 # ตรวจ atomic test ที่มี
 vagrant ssh target1 -c "sudo bash /vagrant/scenarios/check_atomics.sh" > atomic_report.txt
 # (ใน Windows VM) - ต้องรันในเครื่องที่มี C:\AtomicRedTeam\atomics เท่านั้น
+# หรือสั่งจาก host โดยไม่ต้องเปิดหน้าจอ VM:
+#   vagrant up wintarget
+#   vagrant powershell wintarget -c "& C:\vagrant\scenarios_win\check_atomics.ps1 > C:\vagrant\atomic_report_win.txt"
+# ⚠️ `>` ของ PowerShell 5.1 เขียนไฟล์เป็น UTF-16LE ต้องแปลงก่อนอ่านบน host
 powershell -ExecutionPolicy Bypass -File .\scenarios_win\check_atomics.ps1 > atomic_report_win.txt
 .\scenarios_win\check_atomics.ps1 -PasteOnly          # เอาแค่บรรทัดพร้อมวาง
 .\scenarios_win\check_atomics.ps1 -Technique T1486    # เจาะดูตัวเดียว

@@ -9,6 +9,10 @@
 #
 # เอาต์พุตเป็น ASCII ล้วน redirect ลงไฟล์แล้วไม่เพี้ยน
 #
+# ⚠️ ใช้ Write-Output ไม่ใช่ Write-Host
+#    Write-Host เขียนลง information stream (6) ไม่ใช่ success stream (1)
+#    ทำให้ `check_atomics.ps1 > report.txt` ได้ไฟล์ว่าง 0 ไบต์
+#
 # วิธีใช้ (ใน Windows VM):
 #   powershell -ExecutionPolicy Bypass -File .\check_atomics.ps1 > C:\atomic_report_win.txt
 #   powershell -File .\check_atomics.ps1 -Technique T1486,T1490   # เช็คเฉพาะบางตัว
@@ -24,8 +28,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path $AtomicsPath)) {
-    Write-Host "[!] atomics folder not found: $AtomicsPath"
-    Write-Host '    ระบุด้วย -AtomicsPath หรือ $env:ATOMICS'
+    Write-Output "[!] atomics folder not found: $AtomicsPath"
+    Write-Output '    ระบุด้วย -AtomicsPath หรือ $env:ATOMICS'
     exit 1
 }
 
@@ -39,7 +43,7 @@ $SCENARIOS = [ordered]@{
     'trojan_win'     = @('T1082','T1033','T1057','T1087.001','T1059.001','T1547.001',
                          'T1053.005','T1112','T1005','T1074.001','T1027','T1036.003')
     'exploit_win'    = @('T1069.001','T1012','T1497.001','T1552.001','T1548.002',
-                         'T1134','T1055','T1218.011')
+                         'T1134.001','T1134.002','T1055','T1218.011')
 }
 
 # technique ที่ห้ามรันทั้งก้อน (ดู CLAUDE.md ส่วน deny list)
@@ -202,26 +206,26 @@ foreach ($tech in $wanted) {
 # รายงานละเอียด
 # ---------------------------------------------------------------------------
 if (-not $PasteOnly) {
-    Write-Host ('=' * 78)
-    Write-Host '  ATOMIC TESTS WITH WINDOWS SUPPORT'
-    Write-Host "  atomics : $AtomicsPath"
-    Write-Host '  legend  : [admin]=elevation_required  [prereq]=has dependencies'
-    Write-Host '            *** DENY-TECH / DESTRUCTIVE / LOGKILL / REBOOT = DO NOT RUN ***'
-    Write-Host ('=' * 78)
+    Write-Output ('=' * 78)
+    Write-Output '  ATOMIC TESTS WITH WINDOWS SUPPORT'
+    Write-Output "  atomics : $AtomicsPath"
+    Write-Output '  legend  : [admin]=elevation_required  [prereq]=has dependencies'
+    Write-Output '            *** DENY-TECH / DESTRUCTIVE / LOGKILL / REBOOT = DO NOT RUN ***'
+    Write-Output ('=' * 78)
 
     foreach ($tech in $wanted) {
         $r = $result[$tech]
         if ($r.Missing) {
             $err = if ($r.Error) { " ($($r.Error))" } else { '' }
-            Write-Host ''
-            Write-Host "[$tech]  -- no yaml found --$err"
+            Write-Output ''
+            Write-Output "[$tech]  -- no yaml found --$err"
             continue
         }
         $note = if ($DENY_TECH.ContainsKey($tech)) { "   << DENY LIST: $($DENY_TECH[$tech]) >>" } else { '' }
-        Write-Host ''
-        Write-Host "[$tech]  $($r.Tests.Count) windows test(s)$note"
+        Write-Output ''
+        Write-Output "[$tech]  $($r.Tests.Count) windows test(s)$note"
         if ($r.Tests.Count -eq 0) {
-            Write-Host '    -- NO windows test --'
+            Write-Output '    -- NO windows test --'
             continue
         }
         foreach ($t in $r.Tests) {
@@ -231,7 +235,7 @@ if (-not $PasteOnly) {
             $risk = if ($t.Tags.Count) { '  *** ' + ($t.Tags -join ',') + ' ***' } else { '' }
             $nm = $t.Name
             if ($nm.Length -gt 52) { $nm = $nm.Substring(0, 52) }
-            Write-Host ('    {0,3}. {1,-52} ({2}){3}{4}' -f $t.Index, $nm, $t.Executor, $flags, $risk)
+            Write-Output ('    {0,3}. {1,-52} ({2}){3}{4}' -f $t.Index, $nm, $t.Executor, $flags, $risk)
         }
     }
 }
@@ -239,30 +243,30 @@ if (-not $PasteOnly) {
 # ---------------------------------------------------------------------------
 # บรรทัดพร้อมวางลง scenarios_win/*.ps1 แยกตามไฟล์
 # ---------------------------------------------------------------------------
-Write-Host ''
-Write-Host ('=' * 78)
-Write-Host '  PASTE THESE INTO scenarios_win/*.ps1'
-Write-Host '  (manual executor + risky test ถูกตัดออกแล้ว)'
-Write-Host ('=' * 78)
+Write-Output ''
+Write-Output ('=' * 78)
+Write-Output '  PASTE THESE INTO scenarios_win/*.ps1'
+Write-Output '  (manual executor + risky test ถูกตัดออกแล้ว)'
+Write-Output ('=' * 78)
 
 foreach ($scn in $SCENARIOS.Keys) {
-    Write-Host ''
-    Write-Host "---- $scn.ps1 ----"
+    Write-Output ''
+    Write-Output "---- $scn.ps1 ----"
     foreach ($tech in $SCENARIOS[$scn]) {
         $r = $result[$tech]
         if (-not $r -or $r.Missing) {
-            Write-Host "    # Atomic `"$tech`"   <- no yaml, ลบบรรทัดนี้"
+            Write-Output "    # Atomic `"$tech`"   <- no yaml, ลบบรรทัดนี้"
             continue
         }
         if ($DENY_TECH.ContainsKey($tech)) {
-            Write-Host "    # Atomic `"$tech`"   <- DENY LIST ($($DENY_TECH[$tech])) ห้ามเปิด"
+            Write-Output "    # Atomic `"$tech`"   <- DENY LIST ($($DENY_TECH[$tech])) ห้ามเปิด"
             continue
         }
         $nums = @($r.Safe | ForEach-Object { $_.Index })
         if ($nums.Count -eq 0) {
-            Write-Host "    # Atomic `"$tech`"   <- ไม่มี windows test ที่รันได้ ลบบรรทัดนี้"
+            Write-Output "    # Atomic `"$tech`"   <- ไม่มี windows test ที่รันได้ ลบบรรทัดนี้"
         } else {
-            Write-Host ('    Atomic "{0}" "{1}"' -f $tech, ($nums -join ','))
+            Write-Output ('    Atomic "{0}" "{1}"' -f $tech, ($nums -join ','))
         }
     }
 }
@@ -270,10 +274,10 @@ foreach ($scn in $SCENARIOS.Keys) {
 # ---------------------------------------------------------------------------
 # สรุปตัวที่ถูกตัดออก พร้อมเหตุผล (ห้ามเงียบ)
 # ---------------------------------------------------------------------------
-Write-Host ''
-Write-Host ('=' * 78)
-Write-Host '  EXCLUDED TESTS AND WHY'
-Write-Host ('=' * 78)
+Write-Output ''
+Write-Output ('=' * 78)
+Write-Output '  EXCLUDED TESTS AND WHY'
+Write-Output ('=' * 78)
 $anyExcluded = $false
 foreach ($tech in $wanted) {
     $r = $result[$tech]
@@ -281,23 +285,23 @@ foreach ($tech in $wanted) {
     $bad = @($r.Tests | Where-Object { $_.Executor -eq 'manual' -or $_.Tags.Count -gt 0 })
     if ($bad.Count -eq 0) { continue }
     $anyExcluded = $true
-    Write-Host ''
-    Write-Host "[$tech]"
+    Write-Output ''
+    Write-Output "[$tech]"
     foreach ($t in $bad) {
         $why = if ($t.Tags.Count) { ($t.Tags -join ',') } else { 'manual executor (รันเองไม่ได้)' }
         $nm = $t.Name
         if ($nm.Length -gt 46) { $nm = $nm.Substring(0, 46) }
-        Write-Host ('    {0,3}. {1,-46}  -> {2}' -f $t.Index, $nm, $why)
+        Write-Output ('    {0,3}. {1,-46}  -> {2}' -f $t.Index, $nm, $why)
     }
 }
-if (-not $anyExcluded) { Write-Host ''; Write-Host '  (none)' }
+if (-not $anyExcluded) { Write-Output ''; Write-Output '  (none)' }
 
-Write-Host ''
-Write-Host ('=' * 78)
-Write-Host '  SUMMARY'
-Write-Host ('=' * 78)
+Write-Output ''
+Write-Output ('=' * 78)
+Write-Output '  SUMMARY'
+Write-Output ('=' * 78)
 foreach ($tech in $wanted) {
     $r = $result[$tech]
-    if ($r.Missing) { Write-Host ('  {0,-12} no yaml' -f $tech); continue }
-    Write-Host ('  {0,-12} windows={1,-3} runnable={2}' -f $tech, $r.Tests.Count, $r.Safe.Count)
+    if ($r.Missing) { Write-Output ('  {0,-12} no yaml' -f $tech); continue }
+    Write-Output ('  {0,-12} windows={1,-3} runnable={2}' -f $tech, $r.Tests.Count, $r.Safe.Count)
 }

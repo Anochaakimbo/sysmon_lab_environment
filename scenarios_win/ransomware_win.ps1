@@ -40,16 +40,20 @@ Write-Host "[ransom] victim files = $((Get-ChildItem $victim -File).Count)"
 
 # ---------- Stage 2: สำรวจไฟล์เป้าหมาย ----------
 Write-Host "[ransom] discovery"
-Atomic "T1083" "1,2"             # File and Directory Discovery
+Atomic "T1083" "1,2,5,9"             # File and Directory Discovery
 Atomic "T1005" "1"               # Data from Local System
 
 # ---------- Stage 3: staging ----------
 Write-Host "[ransom] staging"
-Atomic "T1074.001" "1"           # Local Data Staging
+Atomic "T1074.001" "1,3"           # Local Data Staging
 
 # ---------- Stage 4: เข้ารหัส (ART จัดการทั้งหมด) ----------
 Write-Host "[ransom] encryption via ART"
-Atomic "T1486" "1,2"             # Data Encrypted for Impact
+Atomic "T1486" "5,8,10"          # Data Encrypted for Impact
+# หมายเหตุ: T1486 บน Windows มี 4 test (5,8,9,10)
+#   ตัด test 9 (DiskCryptor) ออกเอง - มันติดตั้ง driver เข้ารหัสทั้ง volume
+#   checker ไม่ได้จับตัวนี้เพราะ command ไม่มี keyword ที่สแกน
+#   test 8 (GPG4Win) ต้องโหลด+ติดตั้งผ่านเน็ต ใช้เวลาราว 1-2 นาที
 
 # ---------- Stage 5: กิจกรรมไฟล์หนาแน่น (FileCreate/FileDelete telemetry) ----------
 # ransomware จริงจะแตะไฟล์จำนวนมากในเวลาสั้น - จำลอง pattern นั้นด้วย file op ปกติ
@@ -77,7 +81,7 @@ $note | Out-File "$victim\READ_ME_RANSOM.txt" -Encoding utf8
 
 # ---------- Stage 7: ลบร่องรอย ----------
 Write-Host "[ransom] indicator removal"
-Atomic "T1070.004" "1,2"         # Indicator Removal - File Deletion
+Atomic "T1070.004" "4,5,6,7,10"  # Indicator Removal - File Deletion
 
 # ---------- ตัวเลือก: Inhibit System Recovery (T1490) ----------
 # ART มี Windows test สำหรับ T1490 (vssadmin delete shadows / bcdedit)
@@ -93,7 +97,7 @@ Atomic "T1070.004" "1,2"         # Indicator Removal - File Deletion
 
 # ---------- Cleanup ----------
 Write-Host "[ransom] cleanup"
-Atomic-Cleanup "T1486" "1,2"
-Atomic-Cleanup "T1074.001" "1"
+Atomic-Cleanup "T1486" "5,8,10"
+Atomic-Cleanup "T1074.001" "1,3"
 
 Done-Banner "ransomware_win"

@@ -22,9 +22,9 @@ New-Item -ItemType Directory -Path $bot -Force | Out-Null
 
 # ---------- Stage 1: network reconnaissance ----------
 Write-Host "[botnet] network recon"
-Atomic "T1016" "1,2"             # System Network Configuration Discovery
-Atomic "T1049" "1,2"             # System Network Connections Discovery
-Atomic "T1018" "1,2"             # Remote System Discovery
+Atomic "T1016" "1,2,4,9"             # System Network Configuration Discovery
+Atomic "T1049" "1,2,3"             # System Network Connections Discovery
+Atomic "T1018" "1,4,5"             # Remote System Discovery
 
 # recon เพิ่มเติมด้วย built-in (spawn process จริง -> ProcessCreate)
 ipconfig /all      | Out-File "$bot\ipconfig.txt"
@@ -61,9 +61,9 @@ if ($ok -eq 0) { Write-Host "[!] ไม่มี beacon สำเร็จเล
 
 # ---------- Stage 3: protocol / encoding / transfer ----------
 Write-Host "[botnet] protocol + transfer"
-Atomic "T1071.001" "1,2"         # Application Layer Protocol - Web
-Atomic "T1132.001" "1"           # Data Encoding - Standard Encoding
-Atomic "T1105" "1,2"             # Ingress Tool Transfer (ต้องมีเน็ต/NAT)
+Atomic "T1071.001" "1"         # Application Layer Protocol - Web
+Atomic "T1132.001" "3"           # Data Encoding (windows test เดียวคือเลข 3)
+Atomic "T1105" "7,9,10,15,16,25"             # Ingress Tool Transfer (ต้องมีเน็ต/NAT)
 
 # ---------- Stage 4: staging + exfil จำลอง ----------
 Write-Host "[botnet] staging + exfil"
@@ -85,7 +85,7 @@ try {
 # ---------- Cleanup ----------
 # T1105 โหลดไฟล์ลงเครื่อง / T1071.001 ทิ้ง artifact ไว้ ถ้าไม่ล้างจะค้างข้ามรอบ
 Write-Host "[botnet] cleanup"
-Atomic-Cleanup "T1105" "1,2"
-Atomic-Cleanup "T1071.001" "1,2"
+Atomic-Cleanup "T1105" "7,9,10,15,16,25"
+Atomic-Cleanup "T1071.001" "1"
 
 Done-Banner "botnet_win"
