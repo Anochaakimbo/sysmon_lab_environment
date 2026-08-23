@@ -437,6 +437,84 @@ missing pattern ต่างกันชัดมาก — Windows มี `File
 
 → เอนไปทาง **3 หรือ 2** ส่วน 1 เสียของเปล่า
 
+### 7. เทียบกับ NLME.csv ของเปเปอร์ — หลักฐานว่าเป็นพฤติกรรมมัลแวร์จริง
+
+เครื่องมือ: `python host/compare_nlme.py host/dataset/<ชื่อ>_labeled.csv`
+(ต้องมี `reference/NLME.csv` ซึ่ง gitignore ไว้)
+
+**สิ่งที่วัดได้จาก NLME.csv (71,017 แถว) 23 ส.ค. 2026**
+
+| EventID | เปเปอร์ | %mal | หมายเหตุ |
+|---------|---------|------|----------|
+| 11 FileCreate | 39.0% | 11.0% | |
+| 1 ProcessCreate | 29.5% | 22.8% | |
+| 13 RegistrySetValue | 19.6% | **56.8%** | event ที่แบก signal มากสุด |
+| 8 CreateRemoteThread | 6.3% | 0.1% | |
+| 5 ProcessTerminate | 2.1% | 70.9% | |
+| 2 FileCreateTime | 1.8% | 29.3% | |
+| 12 RegistryAddDelete | **1.6%** | **0.1%** | |
+| 3 NetworkConnect | 0.03% | 100% | มีแค่ 20 แถว |
+
+label เปเปอร์: benign 75.8% / malicious 24.2%
+
+**ข้อค้นพบชี้ขาด: EventID 12 ของเปเปอร์ไม่มี `CreateKey` เลยสักแถว**
+มีแต่ `DeleteValue` 1,126 + `DeleteKey` 20 → config ของเปเปอร์กรอง CreateKey ออก
+
+ของเราก่อนแก้: EventID 12 = `CreateKey` 20,332 จาก 20,356 (99.9%) เจ้าของคือ `powershell.exe`
+→ เพิ่ม `<EventType condition="is">CreateKey</EventType>` ใน RegistryEvent exclude
+**นี่คือการทำให้ตรงเปเปอร์ ไม่ใช่แค่ลด noise** — อ้างอิงได้ว่าวัดจาก NLME.csv โดยตรง
+
+**ผลหลังตัด CreateKey (trojan_win, 1,776 events):**
+
+| EventID | เปเปอร์ | เรา | ต่าง |
+|---------|---------|-----|------|
+| 13 RegistrySetValue | 19.6% | 21.7% | **+2.1** |
+| 1 ProcessCreate | 29.5% | 20.1% | −9.4 |
+| 11 FileCreate | 39.0% | 15.0% | **−24.0** |
+| 5 ProcessTerminate | 2.1% | 20.1% | **+18.0** |
+| 23 FileDelete | 0% | 13.0% | +13.0 |
+| 12 RegistryAddDelete | 1.6% | 1.4% | −0.3 |
+
+ผลรวมความต่างสัมบูรณ์ = **83.1 จุด** (0 = เหมือนเป๊ะ, 200 = ไม่ทับกันเลย)
+118,796 → 23,018 → **1,776** events
+
+### หลักฐาน 4 ระดับ — ต้องรายงานแยก ห้ามนับรวมเป็น "มัลแวร์" ทั้งหมด
+
+`label = 1` แปลว่า "สืบสายจาก `C:\lab_sandbox`" ไม่ได้แปลว่า event นั้นเป็นมัลแวร์ในตัวเอง
+`compare_nlme.py` จึงแยกความแรงของหลักฐานเป็น 4 ระดับ (วัด trojan_win 1,118 แถว malicious):
+
+| ระดับ | จำนวน | % | ความหมาย |
+|-------|-------|---|----------|
+| DIRECT | 509 | 45.5% | artifact อยู่ในคอลัมน์ของ event เอง — อ้างอิงได้เต็มปาก |
+| PARENT | 168 | 15.0% | ตัว event ไม่มี artifact แต่ `ParentCommandLine` เป็นคำสั่งของ test |
+| OSBOOK | 188 | 16.8% | OS จดของมันเอง (BAM, PowerShell startup profile) — **ไม่ใช่พฤติกรรมมัลแวร์** |
+| LINEAGE | 253 | 22.6% | ไม่มีหลักฐานในตัว event ติด label เพราะสายเลือดล้วนๆ |
+
+ตัวอย่าง DIRECT ที่ยกไปอ้างในธีสิสได้ตรงๆ:
+```
+T1112       HKU\<SID>\SOFTWARE\NetWire\HostId          (NetWire RAT registry key)
+T1547.001   HKU\<SID>\...\CurrentVersion\Run\
+T1036.003   C:\Users\vagrant\AppData\Roaming\taskhostw.exe   (powershell ถูกก๊อปมาสวมชื่อ)
+T1053.005   schtasks /delete /tn "ATOMIC-T1053.005" /F
+T1074.001   C:\lab_sandbox\trojan_stage\collected.zip
+```
+
+⚠️ **`compare_nlme.py` ต้องแมตช์แยกคอลัมน์** ห้ามเอาทุกคอลัมน์มาต่อกันแล้วยิง regex เดียว
+เวอร์ชันแรกทำแบบนั้นแล้ว `-ExecutionPolicy` ใน CommandLine ไปโดน regex ของ registry
+รายงาน T1112 = 549 แถวปลอม (ของจริง 120) ตัวที่โดนคือ BAM ของ Windows
+
+### ที่ยังต้องแก้ก่อนเก็บจริง
+
+1. **NetworkConnect malicious = 0%** (77 แถว benign ล้วน) ทั้งที่เปเปอร์ = 100%
+   `trojan_win` มี T1059.001 test 8 (mshta download) แต่ไม่ติด lineage
+   → ถ้าปล่อยไว้ event type นี้กลายเป็น "benign เสมอ" = leakage ตรงๆ
+2. **FileCreate 15.0% เทียบเปเปอร์ 39.0%** — เปเปอร์เก็บ FileCreate เยอะกว่ามาก
+   อาจเพราะ sample มัลแวร์จริงเขียนไฟล์เยอะกว่า ART test
+3. **ProcessTerminate 20.1% เทียบเปเปอร์ 2.1%** — เปเปอร์แทบไม่มี event 5
+   ควรพิจารณาตัดทิ้งตอน merge เพื่อให้องค์ประกอบใกล้กันขึ้น
+
+---
+
 ### 6. Harness leakage — ฝั่ง Windows หนักกว่าที่คิด
 
 **วัดจริง 23 ส.ค. 2026 (`trojan_win` รอบสมบูรณ์ หลังกรอง OS noise แล้ว, 23,018 events):**

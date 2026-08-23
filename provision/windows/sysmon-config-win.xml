@@ -84,6 +84,15 @@
          แล้วใช้ <RegistryEvent onmatch="exclude"/> ว่างๆ แทน + provision + save-snapshot ใหม่ -->
     <RuleGroup name="" groupRelation="or">
       <RegistryEvent onmatch="exclude">
+        <!-- CreateKey: ตัดออกให้ตรงกับเปเปอร์
+             วัดจาก reference/NLME.csv (71,017 แถว) 23 ส.ค. 2026:
+               EventID 12 ของเปเปอร์ = DeleteValue 1,126 + DeleteKey 20
+               CreateKey = 0 แถว -> config ของเปเปอร์กรอง CreateKey ออก
+             ของเราก่อนตัด: EventID 12 = CreateKey 20,332 (99.9%) จาก 20,356
+               เจ้าของคือ powershell.exe = registry churn ของ ART harness
+               ไม่ใช่พฤติกรรมมัลแวร์ (โหลด module / resolve .NET assembly)
+             DeleteKey/DeleteValue ยังเก็บ เพราะเปเปอร์มี และเป็น indicator removal จริง -->
+        <EventType condition="is">CreateKey</EventType>
         <Image condition="is">C:\Windows\System32\svchost.exe</Image>
         <Image condition="is">C:\Windows\SysWOW64\svchost.exe</Image>
         <Image condition="is">C:\Windows\System32\CompatTelRunner.exe</Image>
