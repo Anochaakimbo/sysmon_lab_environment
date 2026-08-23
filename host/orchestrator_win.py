@@ -12,7 +12,7 @@ flow: revert -> up -> reload(remount shared folder) -> run .ps1 -> export EVTX -
 
 ใช้งาน:
     python host/orchestrator_win.py --scenario benign
-    python host/orchestrator_win.py --scenario miner_real_win
+    python host/orchestrator_win.py --scenario trojan_win
     python host/orchestrator_win.py --save-snapshot
     python host/orchestrator_win.py --list
 """
@@ -48,27 +48,44 @@ SCENARIOS = {
         "script": "benign.ps1",
         "label": "session:0",
     },
-    # real malware (คู่ขนานกับ Linux) - เขียน .ps1 ตามลำดับ
-    "miner_real_win": {
-        "script": "miner_real_win.ps1",
+    # scenario มัลแวร์ - ART-driven ทั้งหมด (ดู CLAUDE.md)
+    # เลข atomic test ยืนยันกับ ART จริงบน wintarget แล้ว 23 ส.ค. 2026
+    "ransomware_win": {
+        "script": "ransomware_win.ps1",
         "label": "lineage",
         "seed_dir": r"C:\lab_sandbox",
         "seed_cmd": "lab_sandbox",
-        "attack": "T1496,T1105 (XMRig จริง)",
+        "attack": "T1083,T1005,T1074.001,T1486,T1070.004",
     },
-    "trojan_real_win": {
-        "script": "trojan_real_win.ps1",
+    "miner_win": {
+        "script": "miner_win.ps1",
         "label": "lineage",
         "seed_dir": r"C:\lab_sandbox",
         "seed_cmd": "lab_sandbox",
-        "attack": "T1071,T1059.001 (msfvenom backdoor)",
+        "attack": "T1082,T1057,T1105,T1496,T1053.005",
     },
-    "exploit_real_win": {
-        "script": "exploit_real_win.ps1",
+    "botnet_win": {
+        "script": "botnet_win.ps1",
         "label": "lineage",
         "seed_dir": r"C:\lab_sandbox",
         "seed_cmd": "lab_sandbox",
-        "attack": "T1134,T1548 (PrintSpoofer/GodPotato -> SYSTEM)",
+        "attack": "T1016,T1049,T1018,T1071.001,T1132.001,T1105",
+    },
+    "trojan_win": {
+        "script": "trojan_win.ps1",
+        "label": "lineage",
+        "seed_dir": r"C:\lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1082,T1033,T1057,T1087.001,T1059.001,T1547.001,"
+                  "T1053.005,T1112,T1005,T1074.001,T1027,T1036.003",
+    },
+    "exploit_win": {
+        "script": "exploit_win.ps1",
+        "label": "lineage",
+        "seed_dir": r"C:\lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1069.001,T1012,T1497.001,T1552.001,T1548.002,"
+                  "T1134.001,T1134.002,T1055,T1218.011",
     },
 }
 
@@ -179,7 +196,11 @@ def run_scenario(name, duration_min=5):
         f"Copy-Item C:\\vagrant\\scenarios_win\\{spec['script']} C:\\lab_sandbox\\ -Force"
     )
     winrm(f"powershell -Command \"{setup}\"", timeout=180)
-    winrm_ps1(f"C:\\lab_sandbox\\{spec['script']}", timeout=int(duration_min * 60 + 300))
+    # timeout ของ winrm ต้องเผื่อกรณี atomic ค้างจนโดน $AtomicTimeout ตัดหลายตัวติดกัน
+    # 23 ส.ค. 2026: duration 6 -> 660s ไม่พอ trojan_win โดนตัดกลางคันที่ stage สุดท้าย
+    # ทำให้ไม่ได้รัน cleanup -> ใช้พื้นล่าง 2400s (ไม่ถ่วงรอบที่จบเร็ว เพราะรอจนคำสั่งคืนค่า)
+    script_timeout = max(int(duration_min * 60 + 300), 2400)
+    winrm_ps1(f"C:\\lab_sandbox\\{spec['script']}", timeout=script_timeout)
 
     print("[4/6] export Sysmon events -> XML")
     session_tag = f"{name}_{started.strftime('%H%M%S')}"

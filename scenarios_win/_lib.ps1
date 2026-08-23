@@ -4,16 +4,31 @@
 # เทียบเท่า scenarios/_lib.sh ฝั่ง Linux แต่เป็น PowerShell
 
 $SANDBOX = "C:\lab_sandbox"
-$AtomicTimeout = if ($env:ATOMIC_TIMEOUT) { [int]$env:ATOMIC_TIMEOUT } else { 240 }
+# 360s: T1036.003 (4 test คัดลอก binary + spawn) โดน 240s ตัดกลางคัน 23 ส.ค. 2026
+$AtomicTimeout = if ($env:ATOMIC_TIMEOUT) { [int]$env:ATOMIC_TIMEOUT } else { 360 }
+
+# Install-AtomicRedTeam -InstallPath C:\AtomicRedTeam ไม่ได้วาง module ลง PSModulePath
+# ทำให้ `Import-Module Invoke-AtomicRedTeam` ตามชื่อหาไม่เจอ -> ต้อง import ตาม path เต็ม
+# (23 ส.ค. 2026: จุดนี้ทำให้ trojan_win รันแล้วไม่มี atomic test ทำงานเลยสักตัว แต่ exit 0)
+$ARTRoot   = if ($env:ART_ROOT) { $env:ART_ROOT } else { "C:\AtomicRedTeam" }
+$ARTModule = Join-Path $ARTRoot "invoke-atomicredteam\Invoke-AtomicRedTeam.psd1"
+$ARTAtomics = Join-Path $ARTRoot "atomics"
 
 function Setup-Sandbox {
     if (-not (Test-Path $SANDBOX)) {
         New-Item -ItemType Directory -Path $SANDBOX -Force | Out-Null
     }
-    Import-Module Invoke-AtomicRedTeam -Force -ErrorAction SilentlyContinue
-    $global:PSDefaultParameterValues = @{
-        "Invoke-AtomicTest:PathToAtomicsFolder" = "C:\AtomicRedTeam\atomics"
+    if (-not (Test-Path $ARTModule)) {
+        throw "ไม่พบ ART module ที่ $ARTModule - ติดตั้ง ART หรือยัง? (provision/windows/install_art_win.ps1)"
     }
+    Import-Module $ARTModule -Force
+    if (-not (Get-Command Invoke-AtomicTest -ErrorAction SilentlyContinue)) {
+        throw "import $ARTModule แล้วแต่ยังไม่มี Invoke-AtomicTest - module เสียหาย"
+    }
+    $global:PSDefaultParameterValues = @{
+        "Invoke-AtomicTest:PathToAtomicsFolder" = $ARTAtomics
+    }
+    Write-Host "  [setup] ART module พร้อม: $ARTModule"
 }
 
 # Atomic <TECHNIQUE> [TestNumbers]
@@ -23,15 +38,15 @@ function Atomic {
     param([string]$Technique, [string]$TestNumbers = "")
     Write-Host "  [atomic] $Technique $TestNumbers"
     $job = Start-Job -ScriptBlock {
-        param($tech, $nums, $sandbox)
+        param($tech, $nums, $sandbox, $mod, $atomics)
         Set-Location $sandbox
-        Import-Module Invoke-AtomicRedTeam -Force
-        $PSDefaultParameterValues = @{"Invoke-AtomicTest:PathToAtomicsFolder" = "C:\AtomicRedTeam\atomics"}
+        Import-Module $mod -Force
+        $PSDefaultParameterValues = @{"Invoke-AtomicTest:PathToAtomicsFolder" = $atomics}
         $p = @{}
         if ($nums) { $p["TestNumbers"] = $nums.Split(",") }
         Invoke-AtomicTest $tech @p -GetPrereqs -ErrorAction SilentlyContinue
         Invoke-AtomicTest $tech @p -ErrorAction SilentlyContinue
-    } -ArgumentList $Technique, $TestNumbers, $SANDBOX
+    } -ArgumentList $Technique, $TestNumbers, $SANDBOX, $ARTModule, $ARTAtomics
 
     if (Wait-Job $job -Timeout $AtomicTimeout) {
         Receive-Job $job | Select-Object -Last 5
@@ -47,6 +62,9 @@ function Atomic {
 function Atomic-Cleanup {
     param([string]$Technique, [string]$TestNumbers = "")
     Write-Host "  [cleanup] $Technique $TestNumbers"
+    if (-not (Get-Command Invoke-AtomicTest -ErrorAction SilentlyContinue)) {
+        Import-Module $ARTModule -Force
+    }
     $p = @{}
     if ($TestNumbers) { $p["TestNumbers"] = $TestNumbers.Split(",") }
     Invoke-AtomicTest $Technique @p -Cleanup -ErrorAction SilentlyContinue
