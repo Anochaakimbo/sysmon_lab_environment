@@ -60,6 +60,7 @@ $DENY_TECH = @{
 #   DESTRUCTIVE = พังเครื่อง / พังนอก sandbox
 #   LOGKILL     = ทำลาย telemetry ที่กำลังเก็บ (ร้ายกว่าสำหรับงานนี้)
 #   REBOOT      = ตัด log กลางคัน
+#   GUIBLOCK    = เปิดหน้าต่าง GUI แล้วรอผู้ใช้ (job ค้างจนโดน timeout ตัด)
 # ---------------------------------------------------------------------------
 $RISK = @(
     @{ Tag = 'LOGKILL';     Pattern = 'wevtutil\s+cl|Clear-EventLog|Remove-EventLog' }
@@ -70,6 +71,9 @@ $RISK = @(
     @{ Tag = 'DESTRUCTIVE'; Pattern = 'cipher\s+/w|format\s+[a-zA-Z]:|diskpart|Clear-Disk|Initialize-Disk' }
     @{ Tag = 'DESTRUCTIVE'; Pattern = 'del\s+/[fsq][^\r\n]*\bc:\\\*|Remove-Item[^\r\n]*[Cc]:\\\*|rd\s+/s\s+/q\s+c:\\' }
     @{ Tag = 'REBOOT';      Pattern = 'shutdown\s+/[rs]\b|Restart-Computer|Stop-Computer' }
+    # GUIBLOCK = เปิดหน้าต่างแล้วรอผู้ใช้ -> job ค้างจนโดน AtomicTimeout ตัด กิน duration ทั้งรอบ
+    # 24 ส.ค. 2026: T1218.011 test 13 (desk.cpl) ทำให้ exploit_win รันได้แค่ 1 รอบ
+    @{ Tag = 'GUIBLOCK';    Pattern = '\.cpl|Control_RunDLL|FileProtocolHandler|OpenAs_RunDLL' }
 )
 
 # ---------------------------------------------------------------------------
@@ -210,7 +214,7 @@ if (-not $PasteOnly) {
     Write-Output '  ATOMIC TESTS WITH WINDOWS SUPPORT'
     Write-Output "  atomics : $AtomicsPath"
     Write-Output '  legend  : [admin]=elevation_required  [prereq]=has dependencies'
-    Write-Output '            *** DENY-TECH / DESTRUCTIVE / LOGKILL / REBOOT = DO NOT RUN ***'
+    Write-Output '            *** DENY-TECH / DESTRUCTIVE / LOGKILL / REBOOT / GUIBLOCK = DO NOT RUN ***'
     Write-Output ('=' * 78)
 
     foreach ($tech in $wanted) {

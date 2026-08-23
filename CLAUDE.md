@@ -443,6 +443,169 @@ T1547.001 1,2,8,9,11 T1548.002 1,3,5,7,9  T1552.001 4,5,13,14
 
 ---
 
+## ผลตรวจ scenario ฝั่ง Windows ครบทั้ง 6 (24 ส.ค. 2026)
+
+เก็บด้วยเงื่อนไขเดียวกันหมด: Defender ปิด (Tamper Protection ปิดแล้ว), repeat loop,
+sysmon config ที่กรอง CreateKey + OS housekeeping, `c2_server.py` + `mining_pool.py` เปิดค้าง
+
+| scenario | แถว | รอบ | atomic | cleanup | ท่อ C2/pool | ผล |
+|----------|-----|-----|--------|---------|-------------|-----|
+| `benign` | 9,293 | 18 | — | — | — | ✅ label 0 ล้วน |
+| `ransomware_win` | 9,970 | 4 | ครบ | ครบ | — | ✅ |
+| `trojan_win` | 4,100 | 2 | ครบ | ครบ | — | ✅ |
+| `botnet_win` | 3,678 | 2 | ครบ | ครบ | `beacon ok=30 fail=0` | ✅ |
+| `miner_win` | 2,522 | 2 | ครบ | ครบ | `pool connect ok=20 fail=0` | ✅ |
+| `exploit_win` | 2,803 | 1 | ครบ | ครบ | — | ✅ |
+
+**รวม 32,366 แถว** (ก่อนแก้ repeat loop ทั้งฝั่ง Windows ได้แค่ 3,546)
+
+เกณฑ์ "ผ่าน" ที่ใช้ตรวจ — ไม่ใช่แค่มีข้อมูลออกมา:
+1. atomic รันครบทุก technique ไม่มีตัวโดน `$AtomicTimeout` ตัด
+2. `Atomic-Cleanup` รันจนจบ (นับจำนวนบรรทัด `[cleanup]` ให้ตรงกับที่เรียก)
+3. event ครบชนิดที่ scenario ควรสร้าง — โดยเฉพาะ `NetworkConnect` ของ botnet/miner
+4. lineage จับ seed ได้ (`is_seed=1` > 0 process)
+5. ไม่มีสัญญาณ fail เงียบ (ART module / Defender / c2 / pool)
+
+### 🚨 orchestrator_win รัน scenario ครั้งเดียว — `--duration` ไม่มีผลจริง
+
+**เจอ 23 ส.ค. 2026** `orchestrator.py` ฝั่ง Linux วนซ้ำ scenario จนครบเวลา
+แต่ `orchestrator_win.py` รัน `.ps1` **ครั้งเดียว** `--duration` จึงมีผลแค่กับ timeout
+
+ผลกระทบวัดได้: `benign_win` ได้ **528 แถว** เทียบ `benign` ฝั่ง Linux **5,330 แถว**
+และทำให้สัดส่วน label สองแพลตฟอร์มต่างกัน **33.5 จุด** → platform กลายเป็น proxy ของ label
+
+แก้แล้ว: เพิ่ม repeat loop + `--no-repeat` ไว้ย้อนพฤติกรรมเดิม
+พิมพ์ `รวม N รอบ` ทุกครั้งเพื่อให้เห็นว่าวนจริงกี่รอบ
+→ `benign_win` เพิ่มเป็น **9,293 แถว (18 รอบ)** และ label balance เหลือต่างกัน **0.5 จุด**
+
+### 🚨 GUIBLOCK — atomic test ที่เปิดหน้าต่างแล้วรอผู้ใช้
+
+`T1218.011` test 13 `Rundll32 with desk.cpl` เปิด Control Panel แล้วรอตลอดไป
+→ job ค้างจนโดน `$AtomicTimeout` 360s ตัด → กิน duration ทั้งรอบ
+`exploit_win` เลยรันได้แค่ 1 รอบ ขณะที่ตัวอื่นได้ 2-4 รอบ
+
+ตัด test 13 และ 15 (`FileProtocolHandler` เปิด default handler ได้เหมือนกัน) ออกแล้ว
+เหลือ `Atomic "T1218.011" "2,3,9"` → รอบใหม่ timeout เหลือ 0 ครั้ง
+
+เพิ่ม tag **`GUIBLOCK`** ใน `check_atomics.ps1` จับ `.cpl`, `Control_RunDLL`,
+`FileProtocolHandler`, `OpenAs_RunDLL`
+
+⚠️ นี่คือเคสที่ 2 ที่ checker จับไม่ได้ (เคสแรกคือ T1486 test 9 DiskCryptor)
+**checker ช่วยกรอง ไม่ได้แทนการอ่านชื่อ test เอง**
+
+### Dashboard รองรับสองแพลตฟอร์มแล้ว
+
+**เจอ 24 ส.ค. 2026:** `dashboard.py` `import orchestrator` อย่างเดียว และฮาร์ดโค้ด
+`vm="target1"` → กดเก็บผ่านหน้าเว็บได้เฉพาะ Linux **ฝั่ง Windows ไม่มีปุ่มให้กดด้วยซ้ำ**
+
+แก้แล้ว:
+- `REGISTRY` รวมทั้งสอง orchestrator (Linux 9 + Windows 6 = 15 scenario)
+- `_run_one` เลือก orchestrator ตาม `platform`
+- `start_collectors(session, platform)` — ข้าม `log_receiver` ตอนรัน Windows
+  (ฝั่งนั้นไม่ได้ส่ง syslog แต่ export EVTX ตอนจบ) แต่ยังเปิด `mining_pool` + `c2_server`
+- UI แยกกลุ่ม 🐧 Linux — VM target1 / 🪟 Windows — VM wintarget + ปุ่มเลือกชุดแยกฝั่ง
+- เตือนเมื่อเลือกคิวข้ามแพลตฟอร์ม (ต้องสลับ VM ไปมา ใช้เวลานานขึ้นมาก)
+- ชื่อ scenario ฝั่ง Windows ใน Dashboard เป็น `benign_win` (กันชนกับ `benign` ของ Linux)
+
+---
+
+## merge Linux + Windows — สถานะจริงหลังเก็บครบ
+
+เครื่องมือ: `python host/check_merge.py` (รันซ้ำได้ทุกครั้งที่เก็บเพิ่ม)
+
+**ข้อมูล ณ 24 ส.ค. 2026: Linux 24,583 + Windows 32,366 = 56,949 แถว**
+
+### ✅ แก้ได้แล้ว — สัดส่วน label
+
+| | ก่อน | หลัง |
+|---|------|------|
+| Linux malicious | 34.3% | 34.3% |
+| Windows malicious | 67.8% | **33.8%** |
+| ต่างกัน | 33.5 จุด | **0.5 จุด** |
+
+แก้ด้วยการเก็บ `benign_win` + repeat loop ไม่ต้องแตะโมเดลเลย
+
+### ❌ ยังแก้ไม่ได้ — โมเดลแยก platform ได้ 100%
+
+ทายมั่วได้ 56.8% แต่โมเดลทำได้ **100.00%** feature ที่รั่วมากสุด:
+
+| feature | importance | ทำไมรั่ว |
+|---------|-----------|----------|
+| `IntegrityLevel` | 0.1581 | เป็น concept ของ Windows ล้วน Linux ว่าง |
+| `TerminalSessionId` | 0.1475 | Linux ว่างเสมอ |
+| `User` | 0.1088 | `root`/`vagrant` vs `DESKTOP-xxx\vagrant` — ค่าไม่ทับกันเลย |
+| `Image` | 0.0793 | `/usr/bin/x` vs `C:\...\x.exe` |
+| `ParentUser`, `LogonId`, `CurrentDirectory`, `ParentCommandLine` | | เหตุผลเดียวกัน |
+
+**ไล่ตัดทีละรอบแล้ววัดใหม่:**
+
+| รอบ | ตัดอะไร | platform acc |
+|-----|---------|--------------|
+| 0 | — | 100.00% |
+| 1 | Image, IntegrityLevel, LogonId, ParentUser | 100.00% |
+| 2 | CommandLine, CurrentDirectory, Hashes, ParentCommandLine | 99.91% |
+| 3 | EventID, ParentProcessId, TargetFilename, ancestor_depth | 99.44% |
+| 4 | Archived, Device, IsExecutable, enriched | **78.63%** |
+| 5 | EventType, PreviousCreationUtcTime, Product, TargetObject | **67.35%** |
+| จบ | เหลือ 74 feature | **64.22%** |
+
+→ ตัด 20 คอลัมน์แล้วลดจาก 100% เหลือ 64.22% (ทายมั่ว 56.8%) **ยังไม่หมดแต่ลดได้จริง**
+
+### ❌ event type ที่มีฝั่งเดียว — ตัดคอลัมน์ไม่ช่วย ต้องตัดทั้งแถว
+
+| EventID | event | Linux | Windows |
+|---------|-------|-------|---------|
+| 2 | FileCreateTime | 0 | 1,743 |
+| 8 | CreateRemoteThread | 0 | 1 |
+| 12 | RegistryAddDelete | 0 | 106 |
+| 13 | RegistrySetValue | 0 | 4,624 |
+| 4 | (Linux only) | 6 | 0 |
+
+`RegistrySetValue` คือ event ที่แบก signal มากสุดของเปเปอร์ (malicious 56.8%)
+**ตัดทิ้ง = ทิ้งจุดแข็งของฝั่ง Windows**
+
+### ⚠️ โมเดลทำนาย malicious ใช้ feature เดียวกับที่บอก platform 12/15 ตัว
+
+acc 99.43% แต่ top-15 feature ซ้ำกับตัวที่บอก platform ถึง 12 ตัว
+→ ความแม่นนั้นน่าจะมาจากทางลัด platform ไม่ใช่การเรียนพฤติกรรมมัลแวร์
+
+⚠️ **ตัวเลข F1/acc ทุกตัวข้างบนใช้ `train_test_split` แบบสุ่มแถว จึงสูงเกินจริง**
+event หลายแถวมาจาก process เดียวกัน สุ่มแล้วไปอยู่ทั้ง train และ test
+**ตอนเทรนจริงต้องแบ่งตาม session หรือ `ProcessGuid` (GroupKFold)**
+
+### สิ่งที่เปเปอร์ทำไว้แล้วและใช้ได้เลย
+
+อ่าน `reference/1-s2.0-S277291842500027X-main.pdf` หัวข้อ 3.1:
+
+- **ตัด `Image` เพราะ leakage** — เปเปอร์เขียนเองว่า "removed due to its direct
+  association with the target variable (label)" ตรงกับที่เราวัดได้
+- ตัดด้วย: `ProcessId`, `ProcessGUID`, `node_id`, `parent_node_id`, `UtcTime`,
+  `timestamp`, `host_name`
+- encode: null → `-1` ทุกที่ / categorical < 21 ค่า → label encoding /
+  categorical ≥ 21 ค่า → **ความยาวสตริง** / numeric คงค่าเดิม
+- เลือก feature ด้วย PCA ไล่ n=1..N เอา n ที่ F1 ดีสุด → RF 20 feature ได้ F1 0.8868
+
+⚠️ **ลองใช้ encoder ของเปเปอร์แล้วยังแยก platform ได้ 100%**
+เพราะเทคนิคความยาวสตริงใช้กับคอลัมน์ ≥21 ค่าเท่านั้น ส่วน `User`/`IntegrityLevel`
+มีค่าน้อยจึง label encode แล้วได้เลขคนละชุดสองฝั่ง
+เปเปอร์ไม่เจอปัญหานี้เพราะมี platform เดียว → **เราใช้ตามตรงๆ ไม่ได้**
+
+### เครื่องมือที่มี (ไม่ได้อยู่ในท่อข้อมูล เป็นตัววินิจฉัย)
+
+| ไฟล์ | ทำอะไร |
+|------|--------|
+| `host/check_merge.py` | ตรวจ 5 อย่างว่า merge ได้ไหม |
+| `host/paper_encoding.py` | preprocessing ตามเปเปอร์เป๊ะ |
+| `host/select_merge_features.py` | greedy backward elimination หา feature ที่ไม่รั่ว |
+| `host/compare_nlme.py` | เทียบองค์ประกอบกับ NLME + พิสูจน์พฤติกรรมมัลแวร์ 4 ระดับ |
+| `host/rebuild_dataset.py` | สร้าง CSV ใหม่จาก raw log |
+| `host/merge_dataset.py` | รวมทุก session เป็น CSV เดียว **ดิบ 79 คอลัมน์ ไม่ encode** |
+
+CSV ที่เอาไปเข้าเฟส ML คือผลจาก `merge_dataset.py` — ดิบทั้งหมด
+การ encode/PCA/เลือก feature เป็นงานของโค้ด ML ไม่ใช่ของท่อเก็บข้อมูล
+
+---
+
 ## 🚨 กับดักด้านระเบียบวิธี (สำคัญต่อความน่าเชื่อถือของธีสิส)
 
 ### 1. VM leakage

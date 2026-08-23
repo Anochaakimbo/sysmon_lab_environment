@@ -41,15 +41,43 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 import orchestrator as orch
+import orchestrator_win as orch_win
 
 HOST_DIR = Path(__file__).resolve().parent
 LAB_DIR = HOST_DIR.parent
 LOG_DIR = HOST_DIR / "logs"
 DATASET_DIR = HOST_DIR / "dataset"
 
-# preset ชุด scenario สะอาด (6 ตัว) สำหรับเก็บ dataset ครบชุด
-# ใช้ real malware ให้ครบ 3 ตัว (miner_real/exploit_real/trojan_real) เพื่อความสม่ำเสมอ
-CLEAN_SET = ["benign", "ransomware", "botnet", "miner_real", "exploit_real", "trojan_real"]
+# ---------------------------------------------------------------------------
+# ทะเบียน scenario รวมสองแพลตฟอร์ม
+#
+# 24 ส.ค. 2026: เดิม dashboard import แต่ orchestrator (Linux) และฮาร์ดโค้ด vm="target1"
+# -> กดเก็บผ่านหน้าเว็บได้เฉพาะ Linux ฝั่ง Windows ไม่มีปุ่มให้กดด้วยซ้ำ
+#
+# ชื่อ scenario ฝั่ง Windows ลงท้าย _win อยู่แล้วทุกตัว ยกเว้น benign ที่ชนกับ Linux
+# จึงตั้ง key เป็น benign_win ในทะเบียนนี้ (ตัว SCENARIOS ของ orchestrator_win ยังใช้ benign)
+# ---------------------------------------------------------------------------
+WIN_KEY_MAP = {"benign": "benign_win"}          # key ที่ dashboard ใช้ -> key จริงใน orch_win
+
+
+def _registry():
+    # คืน {key: {platform, spec, real_name}} ของทั้งสองแพลตฟอร์ม
+    reg = {}
+    for k, v in orch.SCENARIOS.items():
+        reg[k] = {"platform": "linux", "spec": v, "real_name": k}
+    for k, v in orch_win.SCENARIOS.items():
+        key = WIN_KEY_MAP.get(k, k)
+        reg[key] = {"platform": "windows", "spec": v, "real_name": k}
+    return reg
+
+
+REGISTRY = _registry()
+
+# preset ชุด scenario สะอาดของแต่ละแพลตฟอร์ม
+CLEAN_SET_LINUX = ["benign", "ransomware", "botnet", "miner_real", "exploit_real", "trojan_real"]
+CLEAN_SET_WIN = ["benign_win", "ransomware_win", "botnet_win", "miner_win",
+                 "exploit_win", "trojan_win"]
+CLEAN_SET = CLEAN_SET_LINUX + CLEAN_SET_WIN
 
 # ---- สถานะรวม (job เดียวต่อครั้ง เพราะ sequential) ----
 STATE = {
@@ -80,15 +108,24 @@ def _spawn(script, *args):
                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
 
-def start_collectors(session):
-    """เปิด log_receiver + mining_pool (stratum :3333) + c2_server (:8080/:4444)
-    mining_pool ต้อง start ก่อนเพื่อยึด 3333 (miner_real ใช้ stratum จริง)"""
+def start_collectors(session, platform="linux"):
+    """เปิด collector ที่จำเป็นตามแพลตฟอร์ม
+
+    log_receiver = ท่อ syslog ของ Linux เท่านั้น
+      ฝั่ง Windows ไม่ได้ส่ง syslog แต่ export EVTX ผ่าน shared folder ตอนจบ scenario
+      -> เปิดไปก็ไม่มีอะไรเข้า และไปยึดพอร์ต 5514 เปล่าๆ
+
+    mining_pool (:3333) + c2_server (:8080/:4444) ใช้ทั้งสองแพลตฟอร์ม
+      botnet_win beacon ไป :8080/:4444 และ miner_win ต่อ pool :3333
+      mining_pool ต้อง start ก่อนเพื่อยึด 3333"""
     stop_collectors()
-    COLLECTORS["receiver"] = _spawn("log_receiver.py", "--session", session)
+    if platform == "linux":
+        COLLECTORS["receiver"] = _spawn("log_receiver.py", "--session", session)
     COLLECTORS["pool"] = _spawn("mining_pool.py")      # :3333 stratum
     time.sleep(0.5)
     COLLECTORS["c2"] = _spawn("c2_server.py")          # :8080 + :4444
-    logline(f"[collectors] log_receiver(session={session}) + mining_pool + c2_server")
+    recv = f"log_receiver(session={session}) + " if platform == "linux" else ""
+    logline(f"[collectors] {recv}mining_pool + c2_server  [{platform}]")
 
 
 def stop_collectors():
@@ -110,16 +147,27 @@ class _LogStream(io.TextIOBase):
 
 def _run_one(name, duration, atomic_timeout):
     """รัน scenario 1 ตัว (revert->boot->run->pipeline) - เก็บ stdout ไป log สด"""
+    entry = REGISTRY.get(name)
+    if not entry:
+        logline(f"[dashboard] ไม่รู้จัก scenario '{name}'")
+        return False
+
+    platform = entry["platform"]
     STATE.update(job=name, phase="running", started=datetime.now().isoformat())
     session = f"{name}_dash_{datetime.now():%H%M%S}"
-    start_collectors(session)
+    start_collectors(session, platform)
     ls = _LogStream()
     ok = False
     try:
         with redirect_stdout(ls), redirect_stderr(ls):
-            orch.run_scenario(name, "target1", float(duration),
-                              repeat=True, atomic_timeout=int(atomic_timeout))
-        logline(f"[dashboard] เสร็จ scenario '{name}'")
+            if platform == "windows":
+                # orchestrator_win ตั้งชื่อ session เองจาก scenario + เวลา
+                # และไม่มี arg vm/atomic_timeout (ใช้ env ATOMIC_TIMEOUT ใน _lib.ps1 แทน)
+                orch_win.run_scenario(entry["real_name"], float(duration), repeat=True)
+            else:
+                orch.run_scenario(name, "target1", float(duration),
+                                  repeat=True, atomic_timeout=int(atomic_timeout))
+        logline(f"[dashboard] เสร็จ scenario '{name}' [{platform}]")
         ok = True
     except Exception as e:  # noqa
         logline(f"[dashboard] '{name}' ล้ม: {e}")
@@ -222,9 +270,10 @@ class Handler(BaseHTTPRequestHandler):
                       "done": STATE["done"], "log": STATE["log"][-120:]}
             return self._send(200, json.dumps(st))
         if self.path == "/api/scenarios":
-            sc = [{"name": k, "attack": v.get("attack", ""),
-                   "label": v.get("label", "")}
-                  for k, v in orch.SCENARIOS.items()]
+            sc = [{"name": k, "platform": e["platform"],
+                   "attack": e["spec"].get("attack", ""),
+                   "label": e["spec"].get("label", "")}
+                  for k, e in REGISTRY.items()]
             return self._send(200, json.dumps(sc))
         if self.path == "/api/dataset":
             return self._send(200, json.dumps(dataset_stats()))
@@ -240,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 names = [body.get("scenario")]
             else:
                 names = body.get("scenarios") or CLEAN_SET
-            names = [n for n in names if n in orch.SCENARIOS]
+            names = [n for n in names if n in REGISTRY]
             if not names:
                 return self._send(400, json.dumps({"error": "ไม่มี scenario ที่ใช้ได้"}))
             dur = body.get("duration", 5)
@@ -312,7 +361,10 @@ th{color:var(--mut);font-weight:500}
     </div>
     <div id="scbtns"></div>
     <div class="ctl" style="margin-top:14px;flex-wrap:wrap">
-      <button onclick="selectClean()">✓ เลือก 6 ตัวสะอาด</button>
+      <button onclick="selectSet(CLEAN_LINUX)">✓ ชุด Linux (6)</button>
+      <button onclick="selectSet(CLEAN_WIN)">✓ ชุด Windows (6)</button>
+      <button onclick="selectSet(CLEAN)">✓ ทั้งสองฝั่ง (12)</button>
+      <button onclick="selectSet([])">✗ ล้าง</button>
       <button onclick="runBatch()" id="batchbtn" class="run">▶ เก็บทั้งชุดที่เลือก</button>
     </div>
     <div id="queue" style="color:var(--mut);font-size:12px;margin-top:6px"></div>
@@ -338,22 +390,35 @@ th{color:var(--mut);font-weight:500}
 </div>
 <script>
 const $=s=>document.querySelector(s);
-const CLEAN=["benign","ransomware","botnet","miner_real","exploit_real","trojan_real"];
+const CLEAN_LINUX=["benign","ransomware","botnet","miner_real","exploit_real","trojan_real"];
+const CLEAN_WIN=["benign_win","ransomware_win","botnet_win","miner_win","exploit_win","trojan_win"];
+const CLEAN=CLEAN_LINUX.concat(CLEAN_WIN);
 let scenarios=[];
 async function j(u,m,b){const r=await fetch(u,{method:m||'GET',
   headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return r.json()}
 async function loadSc(){scenarios=await j('/api/scenarios');
-  $('#scbtns').innerHTML=scenarios.map(s=>{
-    const real=s.name.includes('real');
+  // แยกกลุ่มตาม platform - RAM 32GB รันได้ทีละ VM อยู่แล้ว
+  // ถ้าปนกันจะกดข้ามฝั่งโดยไม่ตั้งใจ แล้วเสียเวลา revert+boot ผิดเครื่อง
+  const row=s=>{
+    const benign=s.name.startsWith('benign');
     return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
       <input type="checkbox" class="scchk" value="${s.name}" ${CLEAN.includes(s.name)?'checked':''}>
-      <button class="run" style="flex:1;text-align:left" onclick="run('${s.name}')" title="${s.attack}">
-        ${real?'🔴':'🟢'} ${s.name}</button></div>`}).join('')}
+      <button class="run" style="flex:1;text-align:left" onclick="run('${s.name}')" title="${s.attack||'(no attack listed)'}">
+        ${benign?'🟢':'🔴'} ${s.name}</button></div>`};
+  const grp=(title,plat)=>{
+    const rows=scenarios.filter(s=>s.platform===plat);
+    if(!rows.length)return '';
+    return `<div style="margin:10px 0 4px;font-weight:600;opacity:.75">${title} (${rows.length})</div>`
+      + rows.map(row).join('')};
+  $('#scbtns').innerHTML = grp('🐧 Linux — VM target1','linux')
+                         + grp('🪟 Windows — VM wintarget','windows')}
 function selected(){return[...document.querySelectorAll('.scchk:checked')].map(c=>c.value)}
-function selectClean(){document.querySelectorAll('.scchk').forEach(c=>c.checked=CLEAN.includes(c.value))}
+function selectSet(set){document.querySelectorAll('.scchk').forEach(c=>c.checked=set.includes(c.value))}
 async function run(name){await j('/api/run','POST',
   {scenario:name,duration:+$('#dur').value,atomic_timeout:+$('#at').value})}
 async function runBatch(){const s=selected();if(!s.length)return alert('เลือก scenario ก่อน');
+  const plats=[...new Set(s.map(n=>(scenarios.find(x=>x.name===n)||{}).platform))];
+  if(plats.length>1&&!confirm('คิวนี้มีทั้ง Linux และ Windows\nจะสลับ VM ไปมา ใช้เวลานานขึ้นมาก\n\nไปต่อ?'))return;
   if(!confirm(`เก็บ ${s.length} scenario เรียงกัน?\n${s.join(', ')}\n\nใช้เวลา ~${s.length*13} นาที`))return;
   await j('/api/run_batch','POST',{scenarios:s,duration:+$('#dur').value,atomic_timeout:+$('#at').value})}
 async function merge(){await j('/api/merge','POST',{})}

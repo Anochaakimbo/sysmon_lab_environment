@@ -6,6 +6,22 @@ Log Receiver - รันบน Windows host
     python log_receiver.py                    # session ชื่อ default
     python log_receiver.py --session ransom_01
 """
+
+# บังคับ utf-8 ก่อนพิมพ์อะไรก็ตาม
+# console เริ่มต้นของ Windows เป็น cp1252 -> print ภาษาไทยแล้ว process ตายทันที
+# 23 ส.ค. 2026: c2_server.py และ mining_pool.py ล้มด้วยเหตุนี้ พอร์ตไม่ขึ้น
+# scenario เลย beacon ไม่ติดโดยดูเหมือนทำงานปกติ - ต้องมีทุกไฟล์ที่มีเอาต์พุตไทย
+import os as _os
+import sys as _sys
+
+_os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+_os.environ.setdefault("PYTHONUTF8", "1")
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 import argparse
 import socket
 import threading

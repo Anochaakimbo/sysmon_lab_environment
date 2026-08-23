@@ -159,7 +159,7 @@ def run_pipeline_win(raw_xml, scenario_name, spec):
 
 
 # ---------------------------------------------------------------- scenario
-def run_scenario(name, duration_min=5):
+def run_scenario(name, duration_min=5, repeat=True):
     if name not in SCENARIOS:
         print(f"[!] ไม่รู้จัก scenario '{name}'  (มี: {', '.join(SCENARIOS)})")
         return
@@ -196,11 +196,30 @@ def run_scenario(name, duration_min=5):
         f"Copy-Item C:\\vagrant\\scenarios_win\\{spec['script']} C:\\lab_sandbox\\ -Force"
     )
     winrm(f"powershell -Command \"{setup}\"", timeout=180)
+
     # timeout ของ winrm ต้องเผื่อกรณี atomic ค้างจนโดน $AtomicTimeout ตัดหลายตัวติดกัน
     # 23 ส.ค. 2026: duration 6 -> 660s ไม่พอ trojan_win โดนตัดกลางคันที่ stage สุดท้าย
     # ทำให้ไม่ได้รัน cleanup -> ใช้พื้นล่าง 2400s (ไม่ถ่วงรอบที่จบเร็ว เพราะรอจนคำสั่งคืนค่า)
     script_timeout = max(int(duration_min * 60 + 300), 2400)
-    winrm_ps1(f"C:\\lab_sandbox\\{spec['script']}", timeout=script_timeout)
+
+    # วนซ้ำจนครบเวลา - เหมือน orchestrator.py ฝั่ง Linux
+    #
+    # 23 ส.ค. 2026: เดิมรันครั้งเดียว --duration จึงมีผลแค่กับ timeout ไม่ได้เพิ่มข้อมูล
+    # ผลคือฝั่ง Windows เก็บได้น้อยกว่า Linux หลายเท่าโดยไม่มีใครสังเกต
+    #   benign_win  528 แถว  vs  benign (Linux)  5,330 แถว
+    #   Windows รวม 3,546    vs  Linux รวม      24,583
+    # ทำให้สัดส่วน label สองแพลตฟอร์มต่างกัน 33.5 จุด -> platform กลายเป็น proxy ของ label
+    # (ดู host/check_merge.py)
+    deadline = time.time() + duration_min * 60
+    loop = 0
+    while True:
+        loop += 1
+        remain = int(deadline - time.time())
+        print(f"    -- รอบที่ {loop} (เหลือ {max(remain,0)} วินาที) --")
+        winrm_ps1(f"C:\\lab_sandbox\\{spec['script']}", timeout=script_timeout)
+        if time.time() >= deadline or not repeat:
+            break
+    print(f"    รวม {loop} รอบ")
 
     print("[4/6] export Sysmon events -> XML")
     session_tag = f"{name}_{started.strftime('%H%M%S')}"
@@ -240,7 +259,9 @@ def run_scenario(name, duration_min=5):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", choices=list(SCENARIOS))
-    ap.add_argument("--duration", type=float, default=5, help="นาที (scenario ยาวสุด)")
+    ap.add_argument("--duration", type=float, default=5, help="นาที (วนซ้ำ scenario จนครบเวลา)")
+    ap.add_argument("--no-repeat", action="store_true",
+                    help="รัน scenario ครั้งเดียว ไม่วนซ้ำ (เดิมเป็นแบบนี้)")
     ap.add_argument("--save-snapshot", action="store_true")
     ap.add_argument("--list", action="store_true")
     args = ap.parse_args()
@@ -255,7 +276,7 @@ def main():
         snapshot_save(); print("[+] เสร็จ"); return
     if not args.scenario:
         ap.error("ต้องระบุ --scenario หรือ --save-snapshot / --list")
-    run_scenario(args.scenario, args.duration)
+    run_scenario(args.scenario, args.duration, repeat=not args.no_repeat)
 
 
 if __name__ == "__main__":
