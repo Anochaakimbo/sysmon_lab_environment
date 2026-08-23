@@ -149,11 +149,102 @@ def table(title, eid, cross, total):
               f"   {m:>8,} {pct(m,n):>5.1f}%")
 
 
+def composition(counter):
+    """คืน dict {EventID: %} จาก Counter"""
+    tot = sum(counter.values())
+    return {k: v * 100.0 / tot for k, v in counter.items()}, tot
+
+
+def dist(a, b):
+    """ระยะห่างองค์ประกอบ = ผลรวมความต่างสัมบูรณ์เป็นจุดเปอร์เซ็นต์ (0-200)"""
+    return sum(abs(a.get(e, 0) - b.get(e, 0)) for e in set(a) | set(b))
+
+
+def variance_report(nlme_path, labeled_path):
+    """
+    ตอบคำถาม "ของเราใกล้เปเปอร์พอหรือยัง" ด้วยเกณฑ์ที่ยุติธรรม
+
+    เทียบเฉพาะแถว malicious (benign ของสองฝั่งมาจากคนละสภาพแวดล้อม เทียบไม่ได้)
+    แล้ววัด 2 อย่าง:
+      - ระยะจากเรา -> ค่าเฉลี่ยเปเปอร์
+      - ระยะระหว่าง host ของเปเปอร์กันเอง  <- นี่คือ "พื้นความแปรปรวน" ที่ยอมรับได้
+    ถ้าระยะของเรา <= ระยะที่เปเปอร์มีในตัวเอง แปลว่าใกล้พอแล้วในเชิงสถิติ
+    """
+    per_host = collections.defaultdict(collections.Counter)
+    pooled = collections.Counter()
+    with io.open(nlme_path, encoding="utf-8", errors="replace", newline="") as f:
+        for r in csv.DictReader(f):
+            if r.get("label") != "1":
+                continue
+            e = (r.get("EventID") or "").strip()
+            pooled[e] += 1
+            per_host[(r.get("host_name") or "?").strip()][e] += 1
+
+    ours = collections.Counter()
+    with io.open(labeled_path, encoding="utf-8", errors="replace", newline="") as f:
+        for r in csv.DictReader(f):
+            if r.get("label") == "1":
+                ours[(r.get("EventID") or "").strip()] += 1
+
+    pool_c, pool_n = composition(pooled)
+    our_c, our_n = composition(ours)
+    host_c = {h: composition(c)[0] for h, c in per_host.items()}
+
+    print("\n" + "=" * 66)
+    print("  4) ใกล้เปเปอร์พอหรือยัง (เทียบเฉพาะแถว malicious)")
+    print("=" * 66)
+    print(f"\n  เปเปอร์ malicious {pool_n:,} แถว จาก {len(host_c)} host")
+    print(f"  ของเรา  malicious {our_n:,} แถว")
+
+    print("\n  ระยะห่างองค์ประกอบ (จุดเปอร์เซ็นต์ 0=เหมือนเป๊ะ 200=ไม่ทับกันเลย)")
+    print("\n  -- แต่ละ host ของเปเปอร์ เทียบกับค่าเฉลี่ยของเปเปอร์เอง --")
+    host_d = []
+    for h, c in sorted(host_c.items()):
+        d = dist(c, pool_c)
+        host_d.append(d)
+        print(f"     {h:<26} {d:>6.1f}")
+    print(f"\n     ค่าเฉลี่ย {sum(host_d)/len(host_d):>5.1f}   สูงสุด {max(host_d):>5.1f}")
+
+    print("\n  -- host ของเปเปอร์ เทียบกันเอง (คู่ที่ต่างกันมากสุด) --")
+    pairs = []
+    hs = sorted(host_c)
+    for i in range(len(hs)):
+        for j in range(i + 1, len(hs)):
+            pairs.append((dist(host_c[hs[i]], host_c[hs[j]]), hs[i], hs[j]))
+    pairs.sort(reverse=True)
+    for d, x, y in pairs[:3]:
+        print(f"     {x.split('.')[0]:<10} vs {y.split('.')[0]:<10} {d:>6.1f}")
+    print(f"\n     ต่างกันเองมากสุด {pairs[0][0]:.1f}   น้อยสุด {pairs[-1][0]:.1f}")
+
+    our_d = dist(our_c, pool_c)
+    print(f"\n  -- ของเรา เทียบค่าเฉลี่ยเปเปอร์ --")
+    print(f"     {our_d:>6.1f}")
+
+    print("\n  " + "-" * 62)
+    if our_d <= max(host_d):
+        print(f"  สรุป: {our_d:.1f} <= {max(host_d):.1f} ที่เป็นระยะสูงสุดของ host เปเปอร์เอง")
+        print("        -> ของเราอยู่ในช่วงความแปรปรวนปกติของ dataset เปเปอร์แล้ว")
+    else:
+        print(f"  สรุป: {our_d:.1f} > {max(host_d):.1f} ที่เป็นระยะสูงสุดของ host เปเปอร์เอง")
+        print("        -> ยังห่างกว่าที่เปเปอร์ต่างกันเอง ดูตารางด้านล่างว่า event ไหนดึง")
+    print("  ระยะที่เปเปอร์ต่างกันเองสูงถึง %.1f แปลว่า 'องค์ประกอบเดียวของเปเปอร์'" % pairs[0][0])
+    print("  ไม่มีอยู่จริง การไล่ให้ตรงเป๊ะจึงไม่ใช่เป้าหมายที่มีความหมาย")
+
+    print("\n  event ที่ดึงระยะของเรามากสุด:")
+    diffs = sorted(((abs(our_c.get(e, 0) - pool_c.get(e, 0)), e) for e in set(our_c) | set(pool_c)),
+                   reverse=True)
+    for d, e in diffs[:5]:
+        print(f"     {EVENT_NAMES.get(e,e):<20} เปเปอร์ {pool_c.get(e,0):>5.1f}%"
+              f"   เรา {our_c.get(e,0):>5.1f}%   ต่าง {our_c.get(e,0)-pool_c.get(e,0):>+6.1f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("labeled", help="*_labeled.csv ของเรา")
     ap.add_argument("--nlme", default="reference/NLME.csv")
     ap.add_argument("--top", type=int, default=6, help="จำนวนตัวอย่างหลักฐานต่อ technique")
+    ap.add_argument("--variance", action="store_true",
+                    help="เทียบความต่างของเรากับความต่างที่เปเปอร์มีในตัวเอง (host ต่อ host)")
     args = ap.parse_args()
 
     if not os.path.exists(args.nlme):
@@ -248,6 +339,9 @@ def main():
     print(f"    {tier['OSBOOK']:,} แถว ({pct(tier['OSBOOK'],mal):.1f}%) เป็นการจดของ OS ไม่ใช่พฤติกรรมมัลแวร์")
     print(f"    {tier['LINEAGE']:,} แถว ({pct(tier['LINEAGE'],mal):.1f}%) มาจาก lineage อย่างเดียว")
     print("  ตัวเลข 2 กลุ่มท้ายต้องรายงานตรงๆ ไม่ใช่นับรวมเป็น 'มัลแวร์' ทั้งหมด")
+
+    if args.variance:
+        variance_report(args.nlme, args.labeled)
     return 0
 
 
