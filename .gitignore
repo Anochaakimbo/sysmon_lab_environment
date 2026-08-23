@@ -11,3 +11,4 @@ __pycache__/
 reference/
 host/payloads/
 host/logs_win/
+atomic_report_win.txt
