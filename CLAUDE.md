@@ -665,12 +665,48 @@ WKSTN-5 มี RegSetValue 13.6% / ProcessCreate 59.2%
 
 ## สถานะปัจจุบัน
 
+### raw log คือแหล่งความจริง — CSV สร้างใหม่ได้เสมอ
+
+`host/dataset/*.csv` เป็นของที่ derive มาทั้งหมด ถ้าหาย/เสีย/อยากเปลี่ยนวิธี label
+**ห้ามรัน VM เก็บใหม่** เพราะจะได้ข้อมูลคนละชุด เทียบกับของเก่าไม่ได้ ให้สร้างใหม่จาก raw log:
+
+```powershell
+python host/rebuild_dataset.py --platform linux --list     # ดูว่ามีอะไรทำได้
+python host/rebuild_dataset.py --platform linux            # ทำตัวที่ยังไม่มี CSV
+python host/rebuild_dataset.py --platform windows --force  # ทับของเดิม
+```
+
+อ่าน `label_spec` จาก `*_meta.json` ที่ orchestrator เขียนคู่กับ log
+และ `seed_dir`/`seed_cmd` จาก `SCENARIOS` ของ orchestrator ตัวที่ตรงแพลตฟอร์ม
+
+| เก็บไว้ที่ | คืออะไร | หายแล้วเป็นไง |
+|-----------|---------|---------------|
+| `host/logs/*.log` | syslog ดิบฝั่ง Linux | **เก็บใหม่อย่างเดียว** |
+| `host/logs_win/*.xml` | EVTX export ฝั่ง Windows | **เก็บใหม่อย่างเดียว** |
+| `host/logs*/*_meta.json` | label spec + ช่วงเวลา | เก็บใหม่ หรือเดาจาก SCENARIOS |
+| `host/dataset/*.csv` | ของ derive | `rebuild_dataset.py` |
+
+⚠️ ทั้ง `logs/`, `logs_win/`, `dataset/` ถูก gitignore — **ไม่มีสำเนาใน git**
+raw log 2 โฟลเดอร์แรกควร backup ไว้ที่อื่นด้วย
+
 **เสร็จแล้ว (Linux):**
 - lab 1 VM + Sysmon + ท่อ log ทะลุถึง host
 - pipeline parse→enrich→label ทำงานครบ
 - Atomic Red Team ติดตั้งและรันได้ (ทุก test exit 0)
 - enrichment ดันจาก 41.8% → 90.2%
-- เก็บได้ 11,691 events จาก 2 รอบ (malicious 30.9%)
+- เก็บได้ **24,583 events จาก 6 scenario** (malicious 34.3%) — เกินเป้า 20,000 แล้ว
+
+| scenario | แถว | malicious |
+|----------|-----|-----------|
+| benign | 5,330 | 0.0% |
+| botnet | 2,249 | 45.5% |
+| exploit_real | 6,646 | 39.6% |
+| miner_real | 872 | 19.8% |
+| ransomware | 5,591 | 64.0% |
+| trojan_real | 3,895 | 26.2% |
+
+(สร้างใหม่จาก raw log ด้วย `rebuild_dataset.py` เมื่อ 23 ส.ค. 2026 หลัง CSV หาย
+raw log รอบ 21 ส.ค. ยังอยู่ครบจึงไม่ต้องเก็บใหม่)
 
 **เสร็จแล้ว (Windows):**
 - ART ติดตั้งแล้ว รัน `Invoke-AtomicTest` ได้
