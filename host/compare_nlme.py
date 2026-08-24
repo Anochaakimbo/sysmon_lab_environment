@@ -80,6 +80,35 @@ DIRECT = [
     ("T1059.001 PowerShell", ("CommandLine",),
      r"powershell(\.exe)?[^\r\n]*\s-(Command|nop|noni|w\s+hidden)|\bIEX\b|Invoke-Expression"),
     ("T1005 Data from Local System", ("CommandLine",), r"Copy-Item[^\r\n]*(Documents|Desktop)"),
+
+    # ---------------- ฝั่ง Linux ----------------
+    # ART ฝั่ง Linux ใช้เทคนิคคนละชุดกับ Windows (ดู CLAUDE.md ตาราง technique)
+    # ถ้าไม่ใส่ แถว Linux จะตกไปอยู่ LINEAGE ทั้งหมด แล้วรายงานต่ำกว่าความจริงมาก
+    ("T1053.003 Cron", ("TargetFilename",), r"/var/spool/cron/|/etc/cron\.(d|daily|hourly)/"),
+    ("T1053.003 Cron", ("CommandLine",), r"\bcrontab\b"),
+    ("T1543.002 Systemd Service", ("TargetFilename",),
+     r"/etc/systemd/system/[^/]+\.service$|/lib/systemd/system/[^/]+\.service$"),
+    ("T1543.002 Systemd Service", ("CommandLine",), r"\bsystemctl\s+(enable|start|daemon-reload)"),
+    ("T1546.004 Shell Init Persistence", ("TargetFilename",),
+     r"/\.(bashrc|bash_profile|profile|zshrc)$|/etc/profile(\.d/)?"),
+    ("T1222.002 File Permission Mod", ("CommandLine",), r"\bchmod\b|\bchown\b|\bchattr\b"),
+    ("T1548.001 Setuid/Setgid", ("CommandLine",), r"chmod\s+[ugoa]*\+s|\bsetcap\b|chmod\s+[0-7]?[2-7][0-7]{3}"),
+    ("T1027 Obfuscated Files", ("CommandLine",), r"base64\s+(-d|--decode)|\bxxd\s+-r|openssl\s+enc"),
+    ("T1105 Ingress Tool Transfer", ("CommandLine",), r"\b(curl|wget)\b[^\r\n]*https?://"),
+    ("T1070.004 File Deletion", ("CommandLine",), r"\brm\s+-[rf]{1,2}\b|\bshred\b|\bunlink\b"),
+    ("T1082 System Info Discovery", ("CommandLine",),
+     r"\buname\b|/etc/os-release|\blscpu\b|\bdmidecode\b|\bhostnamectl\b"),
+    ("T1057 Process Discovery", ("CommandLine",), r"\bps\s+(aux|-ef)|\bpgrep\b|\btop\s+-b"),
+    ("T1033 System Owner Discovery", ("CommandLine",), r"\bwhoami\b|\bid\b\s*$|/etc/passwd"),
+    ("T1016/T1049 Network Discovery", ("CommandLine",),
+     r"\bifconfig\b|\bip\s+(addr|route)|\bnetstat\b|\bss\s+-|\barp\b"),
+    ("T1552.001 Credentials In Files", ("TargetFilename", "CommandLine"),
+     r"/\.ssh/id_[a-z]+|/etc/shadow|/\.aws/credentials|/\.docker/config\.json"),
+    ("T1496 Resource Hijacking", ("Image", "CommandLine"), r"xmrig|minerd|cpuminer|stratum\+tcp"),
+    ("T1059.004 Unix Shell", ("CommandLine",),
+     r"\b(bash|sh|dash)\s+-c\b|\beval\s+|/dev/tcp/"),
+    ("T1074.001 Local Data Staging", ("TargetFilename",),
+     r"/tmp/[^/]*\.(tar|tar\.gz|tgz|zip|gz)$|lab_sandbox/[^/]*\.(tar|zip|gz)$"),
 ]
 
 OSBOOK = [
@@ -89,6 +118,11 @@ OSBOOK = [
     ("PowerShell startup profile", ("TargetFilename",),
      r"StartupProfileData|__PSScriptPolicyTest_|ModuleAnalysisCache"),
     ("Prefetch", ("TargetFilename",), r"\\Prefetch\\.*\.pf$"),
+    # ---------------- ฝั่ง Linux ----------------
+    # ของที่ระบบเขียนเองเพราะ process เรารัน ไม่ใช่พฤติกรรมมัลแวร์
+    ("Linux runtime/cache", ("TargetFilename",),
+     r"^/proc/|^/sys/|^/run/|/\.cache/|/var/log/|^/dev/(pts|null|shm)"),
+    ("Shell history", ("TargetFilename",), r"/\.(bash|zsh)_history$"),
 ]
 
 DIRECT = [(n, cols, re.compile(rx, re.I)) for n, cols, rx in DIRECT]

@@ -89,13 +89,6 @@ SCENARIOS = {
         "seed_cmd": "lab_sandbox",
         "attack": "T1486,T1490,T1083,T1070.004",
     },
-    "trojan": {
-        "script": "trojan.sh",
-        "label": "lineage",
-        "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "lab_sandbox",
-        "attack": "T1059.004,T1543.002,T1053.003,T1005,T1027",
-    },
     "botnet": {
         "script": "botnet.sh",
         "label": "lineage",
@@ -103,35 +96,21 @@ SCENARIOS = {
         "seed_cmd": "lab_sandbox",
         "attack": "T1071.001,T1105,T1571,T1016,T1049",
     },
-    "exploit": {
-        "script": "exploit.sh",
-        "label": "lineage",
-        "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "lab_sandbox",
-        "attack": "T1548.001,T1068,T1055,T1222.002,T1552.001",
-    },
     "miner": {
-        "script": "miner.sh",
-        "label": "lineage",
-        "seed_dir": "/tmp/lab_sandbox",
-        "seed_cmd": "lab_sandbox",
-        "attack": "T1496,T1053.003,T1562.001,T1057",
-    },
-    "miner_real": {
         "script": "miner_real.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
         "seed_cmd": "lab_sandbox",
         "attack": "T1496,T1105,T1053.003,T1057,T1082",
     },
-    "exploit_real": {
+    "exploit": {
         "script": "exploit_real.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",
         "seed_cmd": "lab_sandbox",
         "attack": "T1068,T1003.008,T1136.001,T1548,T1082,T1033",
     },
-    "trojan_real": {
+    "trojan": {
         "script": "trojan_real.sh",
         "label": "lineage",
         "seed_dir": "/tmp/lab_sandbox",

@@ -74,7 +74,7 @@ def _registry():
 REGISTRY = _registry()
 
 # preset ชุด scenario สะอาดของแต่ละแพลตฟอร์ม
-CLEAN_SET_LINUX = ["benign", "ransomware", "botnet", "miner_real", "exploit_real", "trojan_real"]
+CLEAN_SET_LINUX = ["benign", "ransomware", "botnet", "miner", "exploit", "trojan"]
 CLEAN_SET_WIN = ["benign_win", "ransomware_win", "botnet_win", "miner_win",
                  "exploit_win", "trojan_win"]
 CLEAN_SET = CLEAN_SET_LINUX + CLEAN_SET_WIN
@@ -405,7 +405,7 @@ th{color:var(--mut);font-weight:500}
 </div>
 <script>
 const $=s=>document.querySelector(s);
-const CLEAN_LINUX=["benign","ransomware","botnet","miner_real","exploit_real","trojan_real"];
+const CLEAN_LINUX=["benign","ransomware","botnet","miner","exploit","trojan"];
 const CLEAN_WIN=["benign_win","ransomware_win","botnet_win","miner_win","exploit_win","trojan_win"];
 const CLEAN=CLEAN_LINUX.concat(CLEAN_WIN);
 let scenarios=[];
