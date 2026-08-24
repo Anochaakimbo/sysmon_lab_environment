@@ -1,0 +1,368 @@
+================================================================================
+  สรุปการตรวจสอบความถูกต้องของ Dataset
+  Cross-Platform Malware Detection from Sysmon Event Logs (Linux + Windows)
+  ข้อมูล ณ 24 สิงหาคม 2026
+================================================================================
+
+ทุกตัวเลขในเอกสารนี้สร้างซ้ำได้ด้วยคำสั่ง:
+    python host/check_merge.py
+    python host/compare_nlme.py host/dataset/merged_dataset.csv --variance
+    python host/check_scenarios.py
+
+
+================================================================================
+  1. ภาพรวม Dataset
+================================================================================
+
+    รวมทั้งหมด           81,331 แถว  x  79 คอลัมน์
+      Linux              45,311 แถว   (malicious 34.2%)
+      Windows            36,020 แถว   (malicious 33.3%)
+
+    สัดส่วน malicious ต่างกันระหว่างสองแพลตฟอร์ม =  0.9 จุด
+    -> สมดุล  platform ไม่ได้เป็นตัวบอก label
+
+    แหล่งที่มา : 12 session (Linux 6 + Windows 6) เก็บด้วยเงื่อนไขเดียวกันทั้งหมด
+    รูปแบบ     : CSV ดิบ ไม่ผ่านการ encode  (การ encode/PCA เป็นงานของเฟส ML)
+
+
+  รายละเอียดต่อ scenario
+  --------------------------------------------------------------------------
+    platform  session            แถว      malicious   seed   NetConn  net_mal
+    --------  ---------------  --------  ----------  -----  --------  -------
+    linux     benign             10,834       0.0%       0        31        0
+    linux     botnet              3,902      50.3%     262       230      110
+    linux     exploit            13,814      41.4%    1622        46        0
+    linux     miner                 939      19.4%      41        19        7
+    linux     ransomware          8,625      65.3%    1088        61       12
+    linux     trojan              7,197      27.9%     300        44       21
+    windows   benign              8,462       0.0%       0       382        0
+    windows   botnet_win          4,302      53.7%      76       445      139
+    windows   exploit_win         3,387      30.6%      56       208        0
+    windows   miner_win           3,140      39.2%      65       351       91
+    windows   ransomware_win     12,059      40.8%     157       241        9
+    windows   trojan_win          4,670      53.4%     151       224       10
+
+    ข้อสังเกตที่ยืนยันว่าท่อเก็บข้อมูลทำงานถูกต้อง
+      - benign ทั้งสองแพลตฟอร์ม = 0.0% และ seed = 0  ตรงตามนิยาม
+      - botnet/miner มี NetworkConnect ที่เป็น malicious จริง
+        (C2 server และ mining pool ตอบกลับ  beacon 30/30, pool 20/20)
+      - ทุก scenario ที่เป็น malicious มี seed process > 0  lineage จับได้
+
+
+================================================================================
+  2. วิธีติด Label และข้อจำกัดที่ยอมรับ
+================================================================================
+
+  label = 1  แปลว่า  "event นี้เกิดจาก process ที่สืบสายมาจากโฟลเดอร์ sandbox"
+                     (/tmp/lab_sandbox บน Linux, C:\lab_sandbox บน Windows)
+
+  ไม่ได้แปลว่า "event นี้มีลักษณะเป็นมัลแวร์ในตัวเอง"
+
+  วิธีทำงาน (host/label_events.py)
+      1. หา seed  = process ที่ Image หรือ CurrentDirectory อยู่ในโฟลเดอร์ sandbox
+      2. แพร่ label ลงลูกหลานผ่าน ParentProcessGuid  วนจนไม่มีอะไรเพิ่ม
+      3. ติด label ให้ทุก event ของ process ที่ติดธง
+         (ไม่ใช่แค่ ProcessCreate แต่รวม FileCreate/NetworkConnect/RegistrySetValue)
+
+  ทำไมไม่ใช้วิธี session (ทั้ง session = malicious)
+      วัดแล้ว session mode ให้ malicious 100% ทั้งที่ lineage บอกแค่ 8.9%
+      -> ใช้ lineage สำหรับ malicious เสมอ  ใช้ session แค่กับ benign
+
+
+================================================================================
+  3. การพิสูจน์ว่าเป็นพฤติกรรมมัลแวร์จริง - หลักฐาน 3 ชั้น
+================================================================================
+
+  ชั้นที่ 1  DESIGN     กิจกรรมที่รันเป็นมัลแวร์จริงหรือไม่
+  ชั้นที่ 2  DATA       ในข้อมูลมีร่องรอยยืนยันหรือไม่
+  ชั้นที่ 3  EXTERNAL   องค์ประกอบเหมือน dataset ที่ตีพิมพ์แล้วหรือไม่
+
+
+  --------------------------------------------------------------------------
+  ชั้นที่ 1 : ATT&CK Coverage
+  --------------------------------------------------------------------------
+
+    ไม่ได้เขียน payload เอง แต่ใช้ Atomic Red Team ซึ่งเป็น test suite
+    มาตรฐานที่ map กับ MITRE ATT&CK โดยตรง
+
+        Windows   31 technique   131 atomic test  (6 scenario)
+        Linux     ~25 technique                   (6 scenario)
+
+    ทุก event ที่ติด label ย้อนกลับไปหา technique ID ได้
+    ไม่ใช่ "มัลแวร์ก้อนหนึ่งที่ไม่รู้ว่าทำอะไร"
+
+    เลข test ทุกตัวยืนยันกับ ART จริงบน VM แล้ว (cross-check 202 เลข)
+    ไม่ได้เดาจากเอกสาร
+
+
+  --------------------------------------------------------------------------
+  ชั้นที่ 2 : artifact ในข้อมูลจริง  (หลักฐานที่แข็งที่สุด)
+  --------------------------------------------------------------------------
+
+    วัดจาก 27,499 แถวที่ label = 1  แบ่งความแรงของหลักฐานเป็น 4 ระดับ
+
+    ระดับ      จำนวน       %      ความหมาย
+    -------  --------  ------   -----------------------------------------------
+    DIRECT      8,811   32.0%   artifact อยู่ในคอลัมน์ของ event นั้นเอง
+                                อ้างอิงได้เต็มปาก
+    PARENT        950    3.5%   ตัว event ไม่มี artifact
+                                แต่ ParentCommandLine เป็นคำสั่งของ test
+    OSBOOK      1,447    5.3%   OS จดของมันเอง (BAM, PowerShell profile)
+                                ไม่ใช่พฤติกรรมมัลแวร์ - รายงานแยก
+    LINEAGE    16,291   59.2%   ไม่มีหลักฐานในตัว event
+                                ติด label เพราะสายเลือดล้วนๆ
+
+
+    ความหมายของแต่ละระดับ พร้อมตัวอย่างจริงจาก dataset
+    ..........................................................................
+
+    DIRECT - ร่องรอยอยู่ในคอลัมน์ของ event นั้นเอง
+             ปิด label ทิ้งก็ยังชี้ได้ว่าเป็น technique อะไร
+
+      Windows
+        T1547.001   TargetObject  = HKU\<SID>\...\CurrentVersion\Run\
+        T1112       TargetObject  = HKU\<SID>\SOFTWARE\NetWire\HostId
+                                    (registry key ของ NetWire RAT)
+        T1036.003   TargetFilename= C:\Users\vagrant\AppData\Local\Temp\svchost.exe
+                                    (ไฟล์ปลอมชื่อ system binary)
+        T1053.005   CommandLine   = schtasks /run /tn \Microsoft\Windows\
+                                    DiskCleanup\SilentCleanup /I
+        T1074.001   TargetFilename= C:\lab_sandbox\bot\staged.zip
+
+      Linux
+        T1543.002   TargetFilename= /etc/systemd/system/backdoor.service
+        T1552.001   CommandLine   = cp /etc/shadow /tmp/lab_sandbox/exploit/
+                                    shadow_dump.txt
+        T1053.003   CommandLine   = crontab -
+        T1105       CommandLine   = curl -s -m 2 http://192.168.56.1:8080/
+                                    beacon?id=bot1
+        T1027       CommandLine   = openssl enc -aes-256-cbc -pbkdf2 -salt ...
+
+
+    PARENT - ตัวมันไม่มีร่องรอย แต่ process แม่มี
+
+        event         : ProcessTerminate
+        Image         : C:\Windows\System32\conhost.exe
+        CommandLine   : \??\C:\Windows\system32\conhost.exe 0xffffffff -ForceV1
+        ParentCmdLine : "cmd.exe" /c schtasks /delete /tn "ATOMIC-T1053.005" /F
+
+        conhost.exe เองไม่ได้ทำอะไร แต่ถูก spawn โดยคำสั่ง schtasks
+        ที่เป็น T1053.005 จริง -> อ้างได้แบบมีเงื่อนไข
+
+
+    OSBOOK - OS จดของมันเองเพราะ process เรารัน  ไม่ใช่พฤติกรรมมัลแวร์
+
+        TargetObject   : HKLM\System\CurrentControlSet\Services\bam\State\
+                         UserSettings\<SID>\...
+        TargetFilename : C:\Users\vagrant\AppData\Local\Microsoft\Windows\
+                         PowerShell\StartupProfileData
+
+        BAM = Background Activity Moderator ระบบที่ Windows ใช้จดว่ามีโปรแกรม
+        อะไรถูกรัน  มันจดเพราะ process ของเรารัน แต่การจดเป็นงานของ Windows
+        -> ถ้านับรวมเป็นพฤติกรรมมัลแวร์คือการรายงานเกินจริง
+
+
+    LINEAGE - ไม่มีหลักฐานทั้งในตัวเองและใน parent
+
+        event         : ProcessTerminate
+        Image         : C:\Windows\System32\conhost.exe
+        TargetObject  : (ว่าง)
+        ParentCmdLine : powershell.exe -c "write-host -Fore..."
+
+
+    ..........................................................................
+    ทำไม LINEAGE ถึง 59.2%  (ต้องอธิบาย ไม่ใช่ซ่อน)
+    ..........................................................................
+
+    ไม่ใช่เพราะติดป้ายผิด แต่เพราะ event บางชนิดไม่มีช่องเก็บ artifact
+
+    event                 รวม     DIRECT  PARENT  OSBOOK  LINEAGE
+    -----------------  --------  -------  ------  ------  -------
+    RegistrySetValue      2,192      70%      1%     25%       4%
+    ProcessCreate         7,990      36%      5%      0%      58%
+    RegistryAddDelete        47      34%      9%      0%      57%
+    FileDelete            3,621      29%      0%     12%      58%
+    NetworkConnect          399      28%      3%      0%      69%
+    ProcessTerminate     10,515      26%      4%      0%      70%
+    FileCreate            2,731      17%      1%     17%      66%
+    FileCreateTime            4       0%      0%      0%     100%
+
+    ประเด็นสำคัญ
+      - RegistrySetValue มี DIRECT สูงสุด 70%  ซึ่งสอดคล้องกับเปเปอร์อ้างอิง
+        ที่พบว่า event นี้แบก signal มากที่สุด (malicious 56.8% ในชุดของเขา)
+        เป็นการยืนยันข้ามงานวิจัย
+      - ProcessTerminate เป็น 33% ของ dataset แต่ DIRECT แค่ 26%
+        เพราะโดยธรรมชาติ event นี้บอกได้แค่ว่า process จบแล้ว
+        ต่อให้เป็นมัลแวร์จริง event นี้ก็ไม่มีทางมีหลักฐานในตัว
+      - FileCreate มี OSBOOK 17% (PowerShell startup profile, cache)
+        จึงต้องรายงาน OSBOOK แยกจาก DIRECT
+
+
+  --------------------------------------------------------------------------
+  ชั้นที่ 3 : เทียบกับ dataset ที่ตีพิมพ์แล้ว (NLME.csv)
+  --------------------------------------------------------------------------
+
+    เปเปอร์อ้างอิง : Achmad, Nariswari, Pratomo et al.
+                     Cyber Security and Applications 3 (2025) 100110
+    NLME.csv       : 71,017 แถว จาก 5 host (WKSTN-1 ถึง WKSTN-5)
+                     รันมัลแวร์จริงจาก VirusShare
+                     label benign 75.8% / malicious 24.2%
+
+    วิธีวัด : "ระยะห่างองค์ประกอบ" = ผลรวมความต่างสัมบูรณ์ของสัดส่วน EventID
+              เป็นจุดเปอร์เซ็นต์  (0 = เหมือนกันเป๊ะ, 200 = ไม่ทับกันเลย)
+              เทียบเฉพาะแถว malicious เพราะ benign ของสองงานมาจากคนละสภาพแวดล้อม
+
+
+    ขั้นแรก : แสดงว่า "องค์ประกอบเดียวของเปเปอร์" ไม่มีอยู่จริง
+
+        host ของเปเปอร์          ระยะจากค่าเฉลี่ยของเปเปอร์เอง
+        ---------------------    -----------------------------
+        WKSTN-3                          41.3
+        WKSTN-1                          41.7
+        WKSTN-2                          55.1
+        WKSTN-4                          58.6
+        WKSTN-5                          67.7
+
+        host ของเปเปอร์เองต่างกันสูงสุด  122.3 จุด
+          WKSTN-2 : RegistrySetValue 72.7%  ProcessCreate 11.1%
+          WKSTN-5 : RegistrySetValue 13.6%  ProcessCreate 59.2%
+
+        -> การไล่ให้ตรงเป๊ะจึงไม่ใช่เป้าหมายที่มีความหมาย
+           เกณฑ์ที่ยุติธรรมคือ "อยู่ในช่วงความแปรปรวนของเปเปอร์เอง"
+
+
+    ขั้นที่สอง : ของเรา  ต้องเทียบแบบเทียบของชนิดเดียวกัน
+
+        ชุดที่เทียบ                        ระยะ      แถว
+        ------------------------------  --------  --------
+        ทั้งหมด (Linux + Windows)           95.9    27,499
+        ทั้งหมด ตัด event 9, 23              90.5    23,878
+        เฉพาะ Windows                       75.3    11,993
+        เฉพาะ Windows ตัด event 9, 23       57.3     9,711   <-- อยู่ในช่วง
+
+        57.3 อยู่ในช่วง 41.3 - 67.7 ที่ host ของเปเปอร์เองต่างกัน
+
+        เหตุผลที่ต้องตัด event 9 (RawAccessRead) และ 23 (FileDelete)
+          เปเปอร์ไม่ได้เก็บสอง event นี้เลยสักแถว
+          เราเปิดไว้เพื่อให้ merge กับ Linux ได้ (เป็น event ร่วมสองแพลตฟอร์ม)
+          ตอนเทียบกับเปเปอร์จึงต้องกรองออก ไม่งั้นเทียบคนละของ
+
+        เหตุผลที่ไม่ตัด ProcessTerminate ตามเปเปอร์
+          เปเปอร์มี ProcessCreate 27.8% แต่ ProcessTerminate เพียง 6.2%
+          อัตราส่วน 4.5 : 1 ทั้งที่ทุก process ที่เกิดต้องตาย
+          -> การเก็บของเขาถูกตัดจบก่อน process ปิด
+             ตัดตามเขา = ลอกข้อบกพร่องมาด้วย  ของเราเก็บครบกว่า
+
+
+    ข้อค้นพบเพิ่มเติมที่ใช้ปรับการเก็บให้ตรงเปเปอร์
+        EventID 12 ของเปเปอร์ไม่มี CreateKey เลยสักแถว
+        มีแต่ DeleteValue 1,126 + DeleteKey 20
+        -> config ของเปเปอร์กรอง CreateKey ออก
+        ของเราก่อนแก้ EventID 12 = CreateKey 20,332 จาก 20,356 (99.9%)
+        เจ้าของคือ powershell.exe = registry churn ของ harness ไม่ใช่มัลแวร์
+        -> เพิ่ม exclude CreateKey ใน sysmon config
+           เป็นการทำให้ตรงเปเปอร์ ไม่ใช่แค่ลด noise  อ้างอิงได้ว่าวัดจาก NLME.csv
+
+
+================================================================================
+  4. การตรวจสอบด้านระเบียบวิธี (Methodology Validation)
+================================================================================
+
+  ตรวจแล้ว - ผ่าน
+  --------------------------------------------------------------------------
+  [ผ่าน] VM leakage
+         ทุก VM รันทั้ง benign และ malicious  ไม่มี VM ไหนถือ label เดียวล้วน
+
+  [ผ่าน] สมดุล label ระหว่างแพลตฟอร์ม
+         Linux 34.2% / Windows 33.3%  ต่างกัน 0.9 จุด
+         (ก่อนแก้เคยต่างกัน 33.5 จุด ซึ่งทำให้ platform เป็น proxy ของ label)
+
+  [ผ่าน] schema ตรงกันสองแพลตฟอร์ม
+         79 คอลัมน์เท่ากัน ไม่มีคอลัมน์ที่มีเฉพาะฝั่งใดฝั่งหนึ่ง
+
+  [ผ่าน] scenario static check
+         131 เลข atomic test  6 ไฟล์  ผ่านทั้งหมด
+         ตรวจ encoding / เลข test ที่มีจริง / cleanup ครบและเลขตรง /
+         ไม่มี technique ใน deny list
+
+  [ผ่าน] ไม่มี silent failure
+         ART module import สำเร็จ / Defender ปิดจริง /
+         C2 server และ mining pool ตอบกลับ (beacon 30/30, pool 20/20)
+
+
+  ตรวจแล้ว - ยังเป็นข้อจำกัด ต้องจัดการในเฟส ML
+  --------------------------------------------------------------------------
+  [ข้อจำกัด] Platform leakage
+         โมเดลทำนายว่าแถวนี้มาจาก Windows หรือ Linux ได้ 99.99%
+         (ทายมั่วได้ 55.7%)
+         feature ที่รั่วมากสุด : Image, IntegrityLevel, TerminalSessionId,
+                                LogonId, User, CurrentDirectory
+         หลังตัด 19 คอลัมน์ที่รั่ว เหลือ 70.65%  ลดได้แต่ไม่หมด
+         -> ต้องเลือก feature หรือแยกเทรน  ห้าม merge แบบ union ตรงๆ
+
+  [ข้อจำกัด] event type ที่มีอยู่ฝั่งเดียว
+         EventID 2, 8, 12, 13 มีเฉพาะ Windows / EventID 4 มีเฉพาะ Linux
+         RegistrySetValue 4,689 แถว เป็น event ที่แบก signal มากสุด
+         ตัดทิ้ง = ทิ้งจุดแข็งฝั่ง Windows
+         -> ควร map เป็น behavior concept ร่วม (CONFIG_CHANGE)
+            โดยฝั่ง Linux ใช้การเขียนไฟล์ใน /etc/, cron, systemd
+
+  [ข้อจำกัด] 59.2% ของแถว malicious ไม่มี artifact ในตัวเอง
+         -> แก้ด้วยการ aggregate ขึ้นระดับ process / process-tree
+            ตอนสร้าง feature  ไม่ใช้ 1 Sysmon row = 1 ML sample
+
+  [ข้อจำกัด] การแบ่ง train / test
+         ห้ามใช้ train_test_split แบบสุ่มแถว
+         เพราะ event หลายแถวมาจาก process เดียวกัน สุ่มแล้วไปอยู่ทั้งสองฝั่ง
+         โมเดลจะจำ process ได้แทนที่จะเรียนพฤติกรรม  ทำให้ F1 สูงเกินจริง
+         -> ต้องใช้ GroupKFold โดย group = session หรือ ProcessGuid
+
+
+================================================================================
+  5. ข้อจำกัดที่ยอมรับตรงๆ (สำหรับสไลด์หน้าสุดท้าย)
+================================================================================
+
+  1. 59.2% ของแถว malicious ติด label จาก lineage ล้วน ไม่มี artifact ในตัวเอง
+
+  2. 5.3% เป็น OSBOOK คือการที่ OS จดของมันเอง ไม่ใช่พฤติกรรมมัลแวร์
+     รายงานแยกไว้แล้ว ไม่นับรวมเป็นหลักฐาน
+
+  3. การ map artifact กลับไปหา technique ยังไม่แม่น 100%
+     มีบางแถวที่คำสั่งของ harness เอง เช่น bash -c ... /tmp/lab_sandbox/...
+     ถูกนับเป็น T1059.004
+
+  4. ปิด Windows Defender ตอนเก็บข้อมูล
+     เหตุผล : ถ้าไม่ปิด atomic test ที่โหลดไฟล์จะถูกบล็อกแบบเงียบ
+              ทำให้ NetworkConnect ฝั่ง malicious เป็น 0 ทั้งที่ test รายงานว่าสำเร็จ
+     ผลกระทบ : dataset ไม่สะท้อนเครื่องที่มี AV ทำงานอยู่
+
+  5. ใช้ Atomic Red Team ซึ่งเป็นการจำลอง technique ไม่ใช่มัลแวร์ตัวจริง
+     ต่างจากเปเปอร์อ้างอิงที่ใช้ VirusShare sample จริง
+     ข้อดี  : map ATT&CK ได้ตรง ทำซ้ำได้ ระบุได้ว่าแต่ละ event มาจาก technique ใด
+     ข้อเสีย: ไม่มีพฤติกรรมนอกเหนือจาก technique ที่เลือกไว้
+
+
+================================================================================
+  6. สรุปหนึ่งย่อหน้าสำหรับตอบกรรมการ
+================================================================================
+
+  เราไม่ได้พิสูจน์ด้วยการอ้างว่า label ถูกต้อง แต่พิสูจน์สามทาง
+
+  หนึ่ง  ทุกกิจกรรมในแล็บ map กับ MITRE ATT&CK technique ได้
+         เลข test ทุกตัวยืนยันกับ Atomic Red Team บนเครื่องจริงแล้ว
+
+  สอง   32.0% ของแถว malicious มี artifact ยืนยันอยู่ในตัว event เอง
+         เช่น Registry Run key, NetWire RAT key, systemd service,
+         การ dump /etc/shadow  และเมื่อแยกตามชนิด event พบว่า
+         RegistrySetValue ซึ่งเป็น event ที่แบก signal มากที่สุด
+         มี artifact ยืนยันถึง 70%
+
+  สาม   องค์ประกอบ event ของฝั่ง Windows ห่างจาก dataset ของเปเปอร์อ้างอิง
+         57.3 จุด ซึ่งอยู่ในช่วง 41.3 ถึง 67.7 ที่ host ของเปเปอร์เองแตกต่างกัน
+
+  ส่วนที่ยังพิสูจน์ไม่ได้ คือ 59.2% ที่ติด label จากสายเลือดล้วน
+  เรารายงานตัวเลขนี้ตรงๆ และแก้ด้วยการรวมข้อมูลขึ้นเป็นระดับ process
+  ตอนสร้าง feature ซึ่งทำให้ event ที่ไม่มีหลักฐานในตัวเอง
+  ถูกรวมเข้ากับ process ที่มีหลักฐานยืนยัน
+
+================================================================================
