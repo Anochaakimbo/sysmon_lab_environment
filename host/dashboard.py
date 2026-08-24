@@ -322,51 +322,120 @@ HTML = r"""<!doctype html><html lang="th"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sysmon Lab Dashboard</title>
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--fg:#e6edf3;--mut:#8b949e;
---acc:#2f81f7;--ok:#3fb950;--bad:#f85149;--warn:#d29922}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
-font-family:"Segoe UI",system-ui,sans-serif;font-size:14px}
-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;
-align-items:center;gap:14px}
-header h1{font-size:16px;margin:0;font-weight:600}
-.badge{padding:2px 10px;border-radius:12px;font-size:12px;border:1px solid var(--border)}
-.wrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px;max-width:1200px;margin:0 auto}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
-.panel h2{font-size:13px;margin:0 0 12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-button{background:var(--panel);color:var(--fg);border:1px solid var(--border);
-border-radius:8px;padding:10px;cursor:pointer;font-size:13px;transition:.15s}
-button:hover:not(:disabled){border-color:var(--acc);background:#1c2333}
-button:disabled{opacity:.4;cursor:not-allowed}
-button.run{border-color:#2a4}
-.ctl{display:flex;gap:8px;align-items:center;margin:12px 0}
-.ctl label{color:var(--mut);font-size:12px}
-input{background:var(--bg);color:var(--fg);border:1px solid var(--border);
-border-radius:6px;padding:6px 8px;width:64px}
-#log{background:#010409;border:1px solid var(--border);border-radius:8px;padding:10px;
-height:340px;overflow-y:auto;font-family:"Cascadia Code",Consolas,monospace;font-size:12px;
-line-height:1.5;white-space:pre-wrap;color:#c9d1d9}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td,th{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
-th{color:var(--mut);font-weight:500}
-.bar{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-top:4px}
-.bar>span{display:block;height:100%;background:var(--bad)}
-.stat{font-size:26px;font-weight:700}.stat small{font-size:13px;color:var(--mut);font-weight:400}
+:root{
+  --bg:#f4f7fb; --panel:#ffffff; --border:#dce4ef; --border-soft:#eaf0f8;
+  --fg:#152238; --mut:#64748b; --acc:#2563eb; --acc-dark:#1d4ed8;
+  --acc-soft:#eaf1ff; --ok:#0f9d58; --bad:#dc2626; --warn:#b45309;
+  --shadow:0 1px 2px rgba(21,34,56,.06), 0 4px 12px rgba(21,34,56,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font-family:"Inter","Segoe UI",system-ui,-apple-system,sans-serif;font-size:14px;
+  -webkit-font-smoothing:antialiased}
+
+/* ---------- header ---------- */
+header{background:var(--panel);border-bottom:1px solid var(--border);
+  padding:0 24px;display:flex;align-items:center;gap:14px;height:60px;
+  position:sticky;top:0;z-index:10;box-shadow:0 1px 3px rgba(21,34,56,.04)}
+header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:-.01em}
+.badge{padding:4px 11px;border-radius:999px;font-size:12px;font-weight:500;
+  background:var(--bg);border:1px solid var(--border);color:var(--mut);
+  display:inline-flex;align-items:center;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:7px}
+
+/* ---------- segmented tabs ---------- */
+.tabs{display:flex;gap:2px;margin-left:auto;background:var(--bg);
+  border:1px solid var(--border);border-radius:10px;padding:3px}
+.tab{padding:6px 16px;border-radius:7px;background:transparent;color:var(--mut);
+  cursor:pointer;font-size:13px;font-weight:500;transition:.15s;user-select:none;
+  border:none;white-space:nowrap}
+.tab:hover{color:var(--fg)}
+.tab.on{background:var(--acc);color:#fff;font-weight:600;
+  box-shadow:0 1px 3px rgba(37,99,235,.3)}
+
+/* ---------- layout ---------- */
+.wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:22px;
+  max-width:1280px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;
+  padding:20px;box-shadow:var(--shadow)}
+.panel h2{font-size:12px;margin:0 0 16px;color:var(--mut);text-transform:uppercase;
+  letter-spacing:.06em;font-weight:650}
 .full{grid-column:1/3}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.tabs{display:flex;gap:6px;margin-left:auto}
-.tab{padding:7px 16px;border-radius:8px 8px 0 0;border:1px solid var(--border);
-     border-bottom:none;background:var(--bg);color:var(--mut);cursor:pointer;font-size:14px}
-.tab.on{background:var(--panel);color:#fff;font-weight:600}
-.tab:hover{color:#fff}
+
+/* ---------- buttons ---------- */
+button{background:var(--panel);color:var(--fg);border:1px solid var(--border);
+  border-radius:9px;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:500;
+  font-family:inherit;transition:.15s}
+button:hover:not(:disabled){border-color:var(--acc);color:var(--acc-dark);
+  background:var(--acc-soft)}
+button:active:not(:disabled){transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.run{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600;
+  box-shadow:0 1px 3px rgba(37,99,235,.25)}
+button.run:hover:not(:disabled){background:var(--acc-dark);border-color:var(--acc-dark);
+  color:#fff}
+
+/* ---------- scenario list ---------- */
+#scbtns{display:flex;flex-direction:column;gap:6px;margin:4px 0 2px}
+#scbtns > div{display:flex;align-items:center;gap:10px;padding:0}
+#scbtns button.run{background:var(--panel);color:var(--fg);border:1px solid var(--border);
+  box-shadow:none;font-weight:500;padding:10px 13px}
+#scbtns button.run:hover:not(:disabled){background:var(--acc-soft);
+  border-color:var(--acc);color:var(--acc-dark)}
+input[type=checkbox]{width:16px;height:16px;accent-color:var(--acc);cursor:pointer;
+  flex:none;margin:0}
+.scrow{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  text-align:left;min-width:0}
+.scname{display:flex;align-items:center;font-weight:550;white-space:nowrap}
+.sctags{display:flex;gap:4px;flex-wrap:nowrap;overflow:hidden}
+.tag{background:var(--bg);border:1px solid var(--border-soft);color:var(--mut);
+  border-radius:5px;padding:2px 6px;font-size:10.5px;font-weight:500;
+  font-family:"Cascadia Code",Consolas,monospace;white-space:nowrap}
+.tag.more{background:transparent;border-color:transparent}
+
+/* ---------- controls ---------- */
+.ctl{display:flex;gap:9px;align-items:center;margin:14px 0}
+.ctl label{color:var(--mut);font-size:12px;font-weight:500}
+input[type=number]{background:var(--panel);color:var(--fg);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;width:74px;font-family:inherit;font-size:13px}
+input[type=number]:focus{outline:none;border-color:var(--acc);
+  box-shadow:0 0 0 3px var(--acc-soft)}
+input[type=number]:disabled{background:var(--bg);color:var(--mut);cursor:not-allowed}
+
+/* ---------- stats ---------- */
+.stat{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.stat small{font-size:13px;color:var(--mut);font-weight:400}
+.statbox{flex:1;background:var(--bg);border:1px solid var(--border-soft);
+  border-radius:11px;padding:14px 16px}
+.statbox small{color:var(--mut);font-size:12px;display:block;margin-top:3px}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:9px 10px;text-align:left;border-bottom:1px solid var(--border-soft)}
+th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;
+  letter-spacing:.04em}
+tbody tr:hover{background:var(--bg)}
+tbody tr:last-child td{border-bottom:none}
+.bar{height:5px;background:var(--border-soft);border-radius:99px;overflow:hidden;
+  margin-top:5px}
+.bar>span{display:block;height:100%;background:var(--bad);border-radius:99px}
+
+/* ---------- log ---------- */
+#log{background:#0f172a;border:1px solid #1e293b;border-radius:11px;padding:14px;
+  height:340px;overflow-y:auto;font-family:"Cascadia Code",Consolas,monospace;
+  font-size:12px;line-height:1.65;white-space:pre-wrap;color:#cbd5e1}
+#log::-webkit-scrollbar{width:9px}
+#log::-webkit-scrollbar-thumb{background:#334155;border-radius:99px}
+
+@media(max-width:920px){.wrap{grid-template-columns:1fr}.full{grid-column:1}}
 </style></head><body>
 <header>
-  <h1 id="title">🛡️ Sysmon Lab Dashboard</h1>
-  <span class="badge" id="vmstate"><span class="dot" style="background:#666"></span>...</span>
+  <h1 id="title">Sysmon Lab</h1>
+  <span class="badge" id="vmstate"><span class="dot" style="background:#94a3b8"></span>...</span>
   <span class="badge" id="jobstate">idle</span>
   <div class="tabs">
-    <div class="tab" id="tab-linux" onclick="setPlat('linux')">🐧 Linux</div>
-    <div class="tab" id="tab-windows" onclick="setPlat('windows')">🪟 Windows</div>
+    <div class="tab" id="tab-linux" onclick="setPlat('linux')">Linux</div>
+    <div class="tab" id="tab-windows" onclick="setPlat('windows')">Windows</div>
   </div>
 </header>
 <div class="wrap">
@@ -376,6 +445,7 @@ th{color:var(--mut);font-weight:500}
       <label>duration (นาที)</label><input id="dur" type="number" value="5" min="1">
       <label>atomic timeout</label><input id="at" type="number" value="240">
     </div>
+    <div id="vmline" style="color:var(--mut);font-size:12px;margin:0 0 10px"></div>
     <div id="scbtns"></div>
     <div class="ctl" style="margin-top:14px;flex-wrap:wrap">
       <button onclick="selectSet(cleanSet())" id="cleanbtn">✓ เลือกชุดสะอาด</button>
@@ -389,9 +459,9 @@ th{color:var(--mut);font-weight:500}
   </div>
   <div class="panel">
     <h2>Dataset</h2>
-    <div style="display:flex;gap:24px;margin-bottom:12px">
-      <div><div class="stat" id="total">–</div><small>events รวม</small></div>
-      <div><div class="stat" id="malpct">–</div><small>malicious</small></div>
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div class="statbox"><div class="stat" id="total">–</div><small>events รวม</small></div>
+      <div class="statbox"><div class="stat" id="malpct">–</div><small>malicious</small></div>
     </div>
     <table id="sesstbl"><thead><tr><th>session</th><th>events</th><th>mal%</th></tr></thead><tbody></tbody></table>
     <div class="ctl" style="margin-top:12px">
@@ -431,14 +501,22 @@ function renderSc(){
   const rows=scenarios.filter(s=>s.platform===PLAT);
   if(!rows.length){$('#scbtns').innerHTML='<div style="color:var(--mut)">ไม่มี scenario</div>';return}
   const clean=cleanSet();
-  $('#scbtns').innerHTML=`<div style="margin:2px 0 8px;color:var(--mut);font-size:12px">
-      VM: <b>${VM_OF[PLAT]}</b> — ${rows.length} scenario</div>`
-    + rows.map(s=>{
+  const n=rows.length, mal=rows.filter(s=>!s.name.startsWith('benign')).length;
+  $('#vmline').innerHTML=`VM <b style="color:var(--fg)">${VM_OF[PLAT]}</b>
+     &nbsp;·&nbsp; ${n} scenario &nbsp;·&nbsp; ${mal} malicious / ${n-mal} benign`;
+  $('#scbtns').innerHTML = rows.map(s=>{
       const benign=s.name.startsWith('benign');
-      return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      // จุดสีแทน emoji - เข้ากับธีมมากกว่าและอ่านง่ายบนพื้นขาว
+      const dot=`<span class="dot" style="background:${benign?'var(--ok)':'var(--bad)'}"></span>`;
+      const tags=(s.attack||'').split(',').filter(Boolean).slice(0,3)
+        .map(x=>`<span class="tag">${x.trim()}</span>`).join('');
+      const more=(s.attack||'').split(',').filter(Boolean).length-3;
+      return `<div>
         <input type="checkbox" class="scchk" value="${s.name}" ${clean.includes(s.name)?'checked':''}>
-        <button class="run" style="flex:1;text-align:left" onclick="run('${s.name}')" title="${s.attack||'(no attack listed)'}">
-          ${benign?'🟢':'🔴'} ${s.name}</button></div>`}).join('')}
+        <button class="run scrow" onclick="run('${s.name}')" title="${s.attack||'(no attack listed)'}">
+          <span class="scname">${dot}${s.name}</span>
+          <span class="sctags">${tags}${more>0?`<span class="tag more">+${more}</span>`:''}</span>
+        </button></div>`}).join('')}
 
 async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT)}
 function selected(){return[...document.querySelectorAll('.scchk:checked')].map(c=>c.value)}
