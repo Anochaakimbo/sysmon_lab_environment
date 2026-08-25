@@ -46,7 +46,7 @@ EVENT_NAMES = {
 
 # ห้ามใช้เป็น feature - เก็บไว้ใน CSV เพื่อ trace ได้ แต่ต้อง drop ก่อน fit()
 DROP_BEFORE_FIT = [
-    "recv_timestamp", "record_id", "session", "computer", "host_ip",
+    "recv_timestamp", "record_id", "session", "run_id", "computer", "host_ip",
     "ProcessGuid", "LogonGuid", "ParentProcessGuid", "UtcTime",
     "CreationUtcTime", "root_image", "is_seed", "label_method", "enrich_method",
 ]
@@ -84,9 +84,18 @@ def main():
             if missing: print(f"      ขาด: {sorted(missing)}")
             if extra:   print(f"      เกิน: {sorted(extra)}")
             sys.exit(1)
-        sessions[f.stem] = rows
+        # run_id = ชื่อไฟล์ ซึ่ง unique ต่อการกดรัน 1 ครั้ง
+        # ต่างจากคอลัมน์ `session` ที่เก็บแค่ชื่อ scenario (benign/ransomware/...)
+        # ถ้าไม่มีคอลัมน์นี้ การรัน ransomware 5 รอบจะกลายเป็นกลุ่มเดียวกันหมด
+        # -> GroupKFold แยกไม่ออก -> รอบเดียวกันไปอยู่ทั้ง train และ test
+        run_id = f.stem.replace("_labeled", "")
+        for r in rows:
+            r["run_id"] = run_id
+        sessions[run_id] = rows
 
-    print(f"[*] รวม {len(sessions)} session, schema ตรงกันทั้งหมด ({len(header)} คอลัมน์)\n")
+    if header is not None and "run_id" not in header:
+        header = header + ["run_id"]
+    print(f"[*] รวม {len(sessions)} run, schema ตรงกันทั้งหมด ({len(header)} คอลัมน์)\n")
 
     # ---------- ตรวจ sensor-era mismatch ----------
     ev_by_session = {k: Counter(r["EventID"] for r in v) for k, v in sessions.items()}

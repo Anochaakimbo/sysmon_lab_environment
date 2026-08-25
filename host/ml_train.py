@@ -77,7 +77,7 @@ DEFAULT_CSV = os.path.join(_HERE, "dataset", "merged_dataset.csv")
 # --------------------------------------------------------------------------
 PAPER_DROP = ["Image", "ProcessId", "ProcessGuid", "ParentProcessGuid",
               "UtcTime", "computer", "host_ip", "recv_timestamp"]
-OURS_DROP = ["record_id", "session", "platform", "label", "label_method",
+OURS_DROP = ["record_id", "session", "run_id", "platform", "label", "label_method",
              "is_seed", "enrich_method", "root_image", "LogonGuid",
              "CreationUtcTime", "family"]
 DROP = set(PAPER_DROP) | set(OURS_DROP)
@@ -225,6 +225,7 @@ def aggregate_processes(df):
     meta = pd.DataFrame(index=f.index)
     meta["label"] = g["label"].max() if "label" in df.columns else 0
     meta["session"] = g["session"].first() if "session" in df.columns else "?"
+    meta["run"] = g["run_id"].first() if "run_id" in df.columns else meta["session"]
     meta["platform"] = g["platform"].first() if "platform" in df.columns else "?"
     meta["proc"] = f.index.to_numpy()
     return f, meta
@@ -255,6 +256,7 @@ def load(csv, level):
         meta = pd.DataFrame(index=raw.index)
         meta["label"] = pd.to_numeric(raw["label"], errors="coerce").fillna(0).astype(int)
         meta["session"] = raw.get("session", "?")
+        meta["run"] = raw["run_id"] if "run_id" in raw.columns else meta["session"]
         meta["platform"] = raw.get("platform", "?")
         meta["proc"] = raw.get("ProcessGuid", pd.Series(raw.index)).fillna("NA").astype(str)
         # ขั้นที่ 3 ของเปเปอร์: ตัดแถวซ้ำ (ไม่นับคอลัมน์ที่ใช้ trace เท่านั้น)
@@ -279,7 +281,8 @@ def make_split(kind, meta, seed=SEED, test_size=0.3):
         rs.shuffle(ben)
         n = int(len(ben) * 0.9)
         return ben[:n], np.concatenate([ben[n:], np.where(y == 1)[0]])
-    groups = meta["proc"].values if kind == "process" else meta["scen"].values
+    groups = {"process": meta["proc"], "run": meta["run"],
+              "scenario": meta["scen"]}[kind].values
     gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
     return next(gss.split(idx, y, groups=groups))
 
@@ -312,7 +315,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=DEFAULT_CSV)
     ap.add_argument("--level", choices=["event", "process"], default="process")
-    ap.add_argument("--split", choices=["process", "scenario", "random", "paper"],
+    ap.add_argument("--split", choices=["process", "run", "scenario", "random", "paper"],
                     default="process")
     ap.add_argument("--pca", type=int, default=0,
                     help="จำนวน component (0 = ไม่ใช้ PCA). ถ้าใส่ --pca-search จะถูกทับ")
@@ -337,6 +340,10 @@ def main():
     y = meta["label"].values
     print("  level=%s  %d แถว  malicious=%.3f  session=%d"
           % (a.level, len(feats), y.mean(), meta["scen"].nunique()))
+    nrun = meta["run"].nunique()
+    if a.split == "run" and nrun <= meta["scen"].nunique():
+        print("  !! run_id มี %d ค่า เท่ากับจำนวน scenario - แต่ละ scenario เก็บรอบเดียว\n"
+              "     --split run จะเหมือน --split scenario ต้องเก็บซ้ำหลายรอบก่อน" % nrun)
 
     tr, te = make_split(a.split, meta)
     ytr, yte = y[tr], y[te]

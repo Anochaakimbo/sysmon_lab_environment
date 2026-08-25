@@ -1026,9 +1026,15 @@ Decision Tree กับ Random Forest ให้ค่า **ตรงกัน 16
 ตัวเลขขึ้นได้จากการแก้โปรโตคอลอย่างเดียว **ไม่ต้องเก็บเพิ่ม**
 แต่ควรเก็บเพิ่มเพื่อความน่าเชื่อถือ ซึ่งเป็นคนละเรื่อง:
 
-1. **รันแต่ละ scenario ซ้ำเป็น session แยก 3-5 รอบ** (revert snapshot คั่น)
-   → GroupKFold ตาม session ได้จริง มี error bar
-   ⚠️ repeat loop ใน session เดียวไม่นับ ต้องเป็นคนละ session
+1. **รันแต่ละ scenario ซ้ำ 3-5 รอบ = กดปุ่มรันในเว็บใหม่ทุกรอบ** ไม่ใช่เพิ่ม `--duration`
+   `--duration` เพิ่มแค่จำนวน event แต่ทุกแถวมาจาก boot เดียว process tree เดียว
+   ส่วนการกดรันใหม่ orchestrator revert snapshot ก่อน = เครื่องเริ่มใหม่หมด
+
+   🚨 **คอลัมน์ `session` เก็บแค่ชื่อ scenario** (`orchestrator_win.py` ส่ง
+   `--session <scenario_name>`) รัน ransomware 5 รอบได้ค่า `ransomware` ทั้ง 5
+   → GroupKFold แยกรอบไม่ออก การกดรันซ้ำจะไม่มีประโยชน์เลย
+   แก้แล้วใน `merge_dataset.py`: เพิ่มคอลัมน์ **`run_id`** = ชื่อไฟล์ (unique ต่อการกดรัน)
+   แล้วใช้ `python host/ml_train.py --split run` (เตือนให้เองถ้า run_id ยังเท่ากับจำนวน scenario)
 2. **benign ให้หลากหลายกว่านี้** — FP ของ LOF สูงถึง 21.8% บาง fold เพราะ benign แคบ
 3. **เพิ่มเครื่อง** (`computer` มีแค่ 2 ค่า)
 
