@@ -352,6 +352,77 @@ def unsupervised_models(benign, cont):
     ]
 
 
+def run_loso(feats, meta, a):
+    """leave-one-scenario-out ทีละตัวจนครบ - การวัด zero-day ที่ถูกต้อง
+
+    ⚠️ ต่างจาก --split scenario ตรงที่ตัวนั้นสุ่มกันหลาย scenario ออกพร้อมกัน
+    (ครั้งเดียว) ผลเลยแกว่งตาม seed มาก และ train เหลือ scenario น้อยลงเยอะ
+    ตัวนี้กันออกทีละตัว train ยังเห็นอีก 9 ตัวครบ = มาตรฐานที่คนรายงานกัน
+    """
+    if a.drop_derived:
+        feats = feats.drop(columns=[c for c in feats.columns if c in DERIVED_DROP])
+    y = meta["label"].values
+    scen = meta["scen"].values
+    rows = []
+    print("  leave-one-scenario-out: กันออกทีละ scenario จนครบ (ข้าม benign)")
+    for s in sorted(set(scen)):
+        if s.split("|")[-1].startswith("benign"):
+            continue
+        te = np.where(scen == s)[0]
+        tr = np.where(scen != s)[0]
+        if len(np.unique(y[te])) < 2 or len(np.unique(y[tr])) < 2:
+            print("    ข้าม %s (มีคลาสเดียว)" % s)
+            continue
+        if a.level == "event":
+            enc = SysmonEncoder().fit(feats.iloc[tr])
+            Xtr, Xte = enc.transform(feats.iloc[tr]).values, enc.transform(feats.iloc[te]).values
+            names = enc.features_
+        else:
+            Xtr, Xte, names = feats.iloc[tr].values, feats.iloc[te].values, list(feats.columns)
+        sc = StandardScaler().fit(Xtr)
+        A, B = sc.transform(Xtr), sc.transform(Xte)
+        if a.pca:
+            pc = PCA(n_components=min(a.pca, A.shape[1]), random_state=SEED).fit(A)
+            A, B = pc.transform(A), pc.transform(B)
+        ytr, yte = y[tr], y[te]
+        tag = dict(Level=a.level, Protocol="loso", Features=len(names),
+                   PCA_Components=a.pca, HeldOut=s)
+        base = metrics(yte, np.ones_like(yte))
+        rows.append(dict(Learning_Type="Unsupervised", Algorithm="[baseline] flag ทุกแถว",
+                         **tag, **base))
+        line = []
+        for name, m in supervised_models():
+            if name in ("Naive Bayes", "SVM"):
+                continue
+            fit_i = np.arange(len(ytr))
+            m.fit(A[fit_i], ytr[fit_i])
+            s_ = (m.predict_proba(B)[:, 1] if hasattr(m, "predict_proba")
+                  else m.decision_function(B))
+            r = metrics(yte, m.predict(B), s_)
+            rows.append(dict(Learning_Type="Supervised", Algorithm=name, **tag, **r))
+            line.append("%s F1=%.3f" % (name.split()[0], r["F1"]))
+        for name, m in unsupervised_models(A[ytr == 0], a.contamination or 0.3):
+            r = metrics(yte, (m.predict(B) == -1).astype(int), -m.score_samples(B))
+            rows.append(dict(Learning_Type="Unsupervised", Algorithm=name, **tag, **r))
+            if name == "Local Outlier Factor":
+                line.append("LOF F1=%.3f AUC=%.3f" % (r["F1"], r["AUC"]))
+        print("    %-24s test %5d (mal %.2f)  baseline F1=%.3f | %s"
+              % (s, len(te), yte.mean(), base["F1"], "  ".join(line)))
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    piv = df.pivot_table(index="Algorithm", values=["F1", "AUC"], aggfunc="mean").round(4)
+    base_f1 = df[df.Algorithm.str.startswith("[baseline]")].set_index("HeldOut")["F1"]
+    print("\n=== ค่าเฉลี่ยจาก %d scenario ===" % df.HeldOut.nunique())
+    print(piv.to_string())
+    print("\n=== ชนะ baseline กี่ scenario (นับด้วย F1) ===")
+    for alg, g in df[~df.Algorithm.str.startswith("[baseline]")].groupby("Algorithm"):
+        w = sum(1 for _, r in g.iterrows() if r["F1"] > base_f1[r["HeldOut"]])
+        print("    %-22s %d/%d" % (alg, w, len(g)))
+    return df
+
+
 def fold_index(meta, k):
     """แบ่ง fold แบบ "กันไว้ 1 รอบเก็บของทุก scenario" ไม่ใช่สุ่มกลุ่ม
 
@@ -453,6 +524,8 @@ def main():
     ap.add_argument("--drop-derived", action="store_true",
                     help="ตัด feature ที่เป็น artifact ของ pipeline (%s)"
                          % ", ".join(DERIVED_DROP))
+    ap.add_argument("--loso", action="store_true",
+                    help="leave-one-scenario-out ทีละตัวจนครบ (การวัด zero-day ที่ถูกต้อง)")
     ap.add_argument("--cv", type=int, default=0,
                     help="cross-validation กี่ fold โดยกันไว้ 1 รอบเก็บของทุก scenario "
                          "ต่อ fold (0 = ปิด) - ต้องเก็บซ้ำหลายรอบก่อนถึงจะใช้ได้")
@@ -475,6 +548,15 @@ def main():
     if a.split == "run" and nrun <= meta["scen"].nunique():
         print("  !! run_id มี %d ค่า เท่ากับจำนวน scenario - แต่ละ scenario เก็บรอบเดียว\n"
               "     --split run จะเหมือน --split scenario ต้องเก็บซ้ำหลายรอบก่อน" % nrun)
+
+    if a.loso:
+        res = run_loso(feats, meta, a)
+        if len(res) and a.results and a.results != "/dev/null":
+            os.makedirs(os.path.dirname(os.path.abspath(a.results)), exist_ok=True)
+            mode, header = ("a", False) if os.path.exists(a.results) else ("w", True)
+            res.to_csv(a.results, mode=mode, header=header, index=False)
+            print("\nเขียนผล -> %s" % a.results)
+        return
 
     if a.cv:
         res = run_folds(feats, meta, a)
