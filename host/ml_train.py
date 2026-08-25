@@ -326,6 +326,116 @@ def show(rows):
 # ==========================================================================
 # main
 # ==========================================================================
+def supervised_models():
+    """รายชื่อโมเดล supervised + hyperparameter ของเปเปอร์ (ใช้ร่วมกันทุกโหมด)"""
+    return [
+        ("Naive Bayes", GaussianNB(**PAPER_HP["Naive Bayes"])),
+        ("Decision Tree", DecisionTreeClassifier(random_state=SEED, class_weight="balanced",
+                                                 **PAPER_HP["Decision Tree"])),
+        ("Random Forest", RandomForestClassifier(random_state=SEED, n_jobs=-1,
+                                                 class_weight="balanced",
+                                                 **PAPER_HP["Random Forest"])),
+        ("SVM", SVC(random_state=SEED, class_weight="balanced", **PAPER_HP["SVM"])),
+    ]
+
+
+def unsupervised_models(benign, cont):
+    """เทรนด้วย benign อย่างเดียวเสมอ ตาม Fig.4 ของเปเปอร์"""
+    rs = np.random.RandomState(SEED)
+    sub = benign[rs.choice(len(benign), min(6000, len(benign)), replace=False)]
+    return [
+        ("Isolation Forest", IsolationForest(n_estimators=200, contamination=cont,
+                                             random_state=SEED, n_jobs=-1).fit(benign)),
+        ("Local Outlier Factor", LocalOutlierFactor(n_neighbors=20, novelty=True,
+                                                    contamination=cont).fit(benign)),
+        ("One-Class SVM", OneClassSVM(kernel="rbf", gamma="scale", nu=cont).fit(sub)),
+    ]
+
+
+def fold_index(meta, k):
+    """แบ่ง fold แบบ "กันไว้ 1 รอบเก็บของทุก scenario" ไม่ใช่สุ่มกลุ่ม
+
+    ทำไมสุ่มกลุ่มไม่ได้: ถ้ามี ransomware 3 รอบแล้วสุ่มไปอยู่ test ทั้ง 3
+    fold นั้นจะกลายเป็น zero-day โดยบังเอิญ ตัวเลขพังแล้วดูเหมือนโค้ดเสีย
+    """
+    fold = pd.Series(-1, index=meta.index, dtype=int)
+    for scen, grp in meta.groupby("scen"):
+        runs = sorted(grp["run"].unique())
+        for i, r in enumerate(runs):
+            fold[grp.index[grp["run"] == r]] = i % k
+    return fold.values, {s: len(g["run"].unique()) for s, g in meta.groupby("scen")}
+
+
+def run_folds(feats, meta, a):
+    """cross-validation แบบกันไว้ 1 รอบเก็บ -> ได้ mean +/- sd ใส่ธีสิสได้"""
+    y = meta["label"].values
+    fold, per_scen = fold_index(meta, a.cv)
+    nrun = meta["run"].nunique()
+    print("  CV %d fold - กันไว้ 1 รอบเก็บของแต่ละ scenario ต่อ fold" % a.cv)
+    print("     รอบเก็บต่อ scenario: %s"
+          % ", ".join("%s=%d" % (s.split("|")[-1], n) for s, n in sorted(per_scen.items())))
+    if max(per_scen.values()) < 2:
+        print("\n  🚨 ทุก scenario มีรอบเก็บแค่รอบเดียว - ทำ CV แบบกันไว้ 1 รอบไม่ได้\n"
+              "     ต้องกดรันในเว็บซ้ำอย่างน้อย %d รอบต่อ scenario (revert snapshot คั่นทุกรอบ)\n"
+              "     ตอนนี้ใช้ --split process แทนไปก่อน" % a.cv)
+        return pd.DataFrame()
+    if min(per_scen.values()) < a.cv:
+        print("  !! บาง scenario มีรอบเก็บน้อยกว่า %d - fold จะไม่สมดุล" % a.cv)
+
+    if a.drop_derived:
+        feats = feats.drop(columns=[c for c in feats.columns if c in DERIVED_DROP])
+
+    rows = []
+    for f in range(a.cv):
+        te = np.where(fold == f)[0]
+        tr = np.where(fold != f)[0]
+        if len(te) == 0 or len(np.unique(y[tr])) < 2:
+            print("  fold %d: ข้าม (ข้อมูลไม่พอ)" % f)
+            continue
+        if a.level == "event":
+            enc = SysmonEncoder().fit(feats.iloc[tr])
+            Xtr, Xte = enc.transform(feats.iloc[tr]).values, enc.transform(feats.iloc[te]).values
+            names = enc.features_
+        else:
+            Xtr, Xte, names = feats.iloc[tr].values, feats.iloc[te].values, list(feats.columns)
+        s = StandardScaler().fit(Xtr)
+        A, B, _ = s.transform(Xtr), s.transform(Xte), None
+        if a.pca:
+            pc = PCA(n_components=min(a.pca, A.shape[1]), random_state=SEED).fit(A)
+            A, B = pc.transform(A), pc.transform(B)
+        ytr, yte = y[tr], y[te]
+        tag = dict(Level=a.level, Protocol="cv%d" % a.cv, Features=len(names),
+                   PCA_Components=a.pca, Fold=f)
+        sub_rows = []
+        for name, m in supervised_models():
+            fit = np.arange(len(ytr))
+            if name == "SVM" and len(fit) > a.svm_max_train:
+                fit = np.random.RandomState(SEED).choice(fit, a.svm_max_train, replace=False)
+            m.fit(A[fit], ytr[fit])
+            s_ = (m.predict_proba(B)[:, 1] if hasattr(m, "predict_proba")
+                  else m.decision_function(B))
+            sub_rows.append(dict(Learning_Type="Supervised", Algorithm=name, **tag,
+                                 **metrics(yte, m.predict(B), s_)))
+        for name, m in unsupervised_models(A[ytr == 0], a.contamination or 0.1):
+            sub_rows.append(dict(Learning_Type="Unsupervised", Algorithm=name, **tag,
+                                 **metrics(yte, (m.predict(B) == -1).astype(int),
+                                           -m.score_samples(B))))
+        sub_rows.append(dict(Learning_Type="Unsupervised", Algorithm="[baseline] flag ทุกแถว",
+                             **tag, **metrics(yte, np.ones_like(yte))))
+        rows += sub_rows
+        print("  fold %d: test %d แถว (mal %.3f)  RF F1=%.4f  LOF F1=%.4f"
+              % (f, len(te), yte.mean(),
+                 next(r["F1"] for r in sub_rows if r["Algorithm"] == "Random Forest"),
+                 next(r["F1"] for r in sub_rows if r["Algorithm"] == "Local Outlier Factor")))
+
+    df = pd.DataFrame(rows)
+    agg = (df.groupby(["Learning_Type", "Algorithm"])[["Accuracy", "Precision", "Recall", "F1", "AUC"]]
+             .agg(["mean", "std"]).round(4))
+    print("\n=== ค่าเฉลี่ย +/- sd จาก %d fold (ตัวเลขนี้ใส่ธีสิสได้) ===" % a.cv)
+    print(agg.to_string())
+    return df
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=DEFAULT_CSV)
@@ -343,6 +453,9 @@ def main():
     ap.add_argument("--drop-derived", action="store_true",
                     help="ตัด feature ที่เป็น artifact ของ pipeline (%s)"
                          % ", ".join(DERIVED_DROP))
+    ap.add_argument("--cv", type=int, default=0,
+                    help="cross-validation กี่ fold โดยกันไว้ 1 รอบเก็บของทุก scenario "
+                         "ต่อ fold (0 = ปิด) - ต้องเก็บซ้ำหลายรอบก่อนถึงจะใช้ได้")
     ap.add_argument("--family", action="store_true",
                     help="เทรนโมเดลบอกตระกูลมัลแวร์เพิ่ม (ใช้ตอน deploy)")
     ap.add_argument("--svm-max-train", type=int, default=20000,
@@ -362,6 +475,15 @@ def main():
     if a.split == "run" and nrun <= meta["scen"].nunique():
         print("  !! run_id มี %d ค่า เท่ากับจำนวน scenario - แต่ละ scenario เก็บรอบเดียว\n"
               "     --split run จะเหมือน --split scenario ต้องเก็บซ้ำหลายรอบก่อน" % nrun)
+
+    if a.cv:
+        res = run_folds(feats, meta, a)
+        if len(res) and a.results and a.results != "/dev/null":
+            os.makedirs(os.path.dirname(os.path.abspath(a.results)), exist_ok=True)
+            mode, header = ("a", False) if os.path.exists(a.results) else ("w", True)
+            res.to_csv(a.results, mode=mode, header=header, index=False)
+            print("\nเขียนผล -> %s" % a.results)
+        return
 
     tr, te = make_split(a.split, meta)
     ytr, yte = y[tr], y[te]
