@@ -6,6 +6,204 @@ Sysmon Malware Detection Dataset (Linux + Windows)
 ================================================================================
 
 
+================================================================================
+ส่วนที่ 1 - การเก็บ log  (C1-C7)
+================================================================================
+
+
+--------------------------------------------------------------------------------
+C1  "เก็บ log มายังไง / สถาปัตยกรรมแล็บเป็นแบบไหน"
+--------------------------------------------------------------------------------
+Host: Windows 11, Ryzen 7 9700X, RAM 32GB, VMware Workstation Pro + Vagrant
+      RAM 32GB รันหลาย VM พร้อมกันไม่ได้ -> รันทีละเครื่อง (sequential)
+
+    LINUX  (VM: target1, Ubuntu 22.04)
+        scenario (bash) -> Sysmon for Linux -> journald -> rsyslog
+                        -> TCP 5514 -> host/log_receiver.py -> logs/<session>.log
+
+    WINDOWS  (VM: wintarget, Windows 10)
+        scenario (PowerShell) -> Sysmon -> Windows Event Log
+                              -> export_sysmon_win.ps1 -> logs_win/<session>.xml
+
+ต่างกันตรงไหน: Linux ส่ง log ออกทันทีระหว่างรัน (streaming)
+               Windows เก็บใน Event Log แล้ว export ตอนจบ (batch)
+
+ผลที่ตามมา: ฝั่ง Windows มี test ที่สั่ง wevtutil cl / Clear-EventLog
+            จะลบ event ที่เพิ่งเก็บมาทั้งรอบโดยไม่มี error
+            -> checker ติด tag LOGKILL แล้วคัดออกอัตโนมัติ (ฝั่ง Linux ไม่มีความเสี่ยงนี้)
+
+
+--------------------------------------------------------------------------------
+C2  "pipeline ประมวลผลมีกี่ขั้น"
+--------------------------------------------------------------------------------
+    scenario ใน VM
+      -> Sysmon
+      -> transport (syslog / EVTX export)
+      -> parse_sysmon.py     ->  49 คอลัมน์   แปลง XML เป็นตาราง
+      -> enrich_events.py    ->  54 คอลัมน์   เติม field ระดับ process
+      -> label_events.py     ->  56 คอลัมน์   ติด label + is_seed
+      -> merge_dataset.py    ->  80 คอลัมน์   รวมทุก session + run_id
+
+orchestrator.py / orchestrator_win.py เรียก parse -> enrich -> label ให้อัตโนมัติ
+
+raw log คือแหล่งความจริง CSV สร้างใหม่ได้เสมอ
+    python host/rebuild_dataset.py --platform linux
+    -> ถ้า CSV หายหรืออยากเปลี่ยนวิธี label ไม่ต้องรัน VM เก็บใหม่
+       (เก็บใหม่ = ได้ข้อมูลคนละชุด เทียบกับของเก่าไม่ได้)
+
+
+--------------------------------------------------------------------------------
+C3  "ตั้งค่า Sysmon ยังไง เก็บอะไร ไม่เก็บอะไร"
+--------------------------------------------------------------------------------
+หลักการ: ใช้ onmatch="exclude" ว่างเป็นค่าตั้งต้น (เก็บทุกอย่าง)
+         ไม่ใช้ config สำเร็จรูปแบบ SwiftOnSecurity ที่ include เฉพาะของน่าสงสัย
+         เพราะจะทำให้ benign class หายไป -> dataset มี bias
+
+แต่บน Windows การเก็บ RegistryEvent ทุกตัวคือท่อน้ำ วัดจริง 1 รอบก่อนกรอง
+
+    EventID 12 RegistryAddDelete    88,447   74.5%
+    EventID 13 RegistrySetValue     19,895   16.7%
+    EventID 255 Sysmon error         2,838    2.4%
+    EventID 1  ProcessCreate            370    0.3%   <- ของที่ต้องการ
+
+    ที่มาเป็น OS ล้วน: svchost 44,582 / CompatTelRunner 6,526 / EdgeUpdate 6,521
+
+สิ่งที่ตัดออก และเหตุผล
+    1. OS housekeeping ใน RegistryEvent   118,796 -> 23,018 events
+       กรองตาม "path เต็มของ process" ไม่ได้กรองตามความน่าสงสัย
+       -> registry event จาก process ผู้โจมตียังเก็บครบ 100%
+       ต้องใช้ condition="is" path เต็ม ห้ามใช้ end with ชื่อไฟล์
+       เพราะ T1036.003 ปลอม powershell เป็นชื่อ taskhostw.exe / lsass.exe
+
+    2. EventType CreateKey             23,018 -> 1,776 events
+       อ้างอิงจากการวัด NLME.csv ของเปเปอร์โดยตรง:
+       EventID 12 ของเขาไม่มี CreateKey เลยสักแถว มีแต่ DeleteValue 1,126 + DeleteKey 20
+       -> นี่คือการทำให้ตรงเปเปอร์ ไม่ใช่แค่ลดขนาดไฟล์
+
+    3. EventID 255 ไม่ใช่ telemetry
+       "The C:\Sysmon\ owner is not System. Archiving is disabled."
+       ยิงทุกครั้งที่มี FileDelete (2,838 ครั้ง = จำนวน FileDelete พอดี) field อื่นว่างหมด
+       ไม่แก้ ownership ที่ต้นทางเพราะการแก้จะเปิด archiving = Sysmon ก๊อปทุกไฟล์ที่ถูกลบ
+
+
+--------------------------------------------------------------------------------
+C4  "สองแพลตฟอร์มเก็บ event ได้เหมือนกันไหม"
+--------------------------------------------------------------------------------
+คำตอบ: ไม่เหมือน และนี่คือข้อค้นพบที่ต้องรายงาน
+
+    EventID   event                 Linux    Windows
+       1      ProcessCreate        17,845     5,472
+       2      FileCreateTime            0     1,743   <- Windows เท่านั้น
+       3      NetworkConnect          431     1,851
+       4      Sysmon service state      6         0   <- Linux เท่านั้น
+       5      ProcessTerminate     21,415     5,448
+       8      CreateRemoteThread        0         2   <- Windows เท่านั้น
+       9      RawAccessRead           336     4,662
+      11      FileCreate            2,336     7,198
+      12      RegistryAddDelete         0       117   <- Windows เท่านั้น
+      13      RegistrySetValue          0     4,689   <- Windows เท่านั้น
+      23      FileDelete            2,942     4,838
+
+Sysmon for Linux ไม่มี registry (Linux ไม่มี registry) และไม่เคยยิง ProcessAccess (10)
+
+คอลัมน์ที่ Windows มีแต่ Linux ว่าง 100%  =  22 คอลัมน์
+    FileVersion Description Product Company OriginalFileName
+    TargetObject EventType Details PreviousCreationUtcTime
+    SourceImage TargetImage StartAddress NewThreadId ...
+
+-> ผลกระทบ: โมเดลแยกแพลตฟอร์มได้จาก missing pattern ทันที (ดู B5)
+   ทางเลือกที่เลือก: รายงานทั้งแบบรวมและแบบแยกเทรน
+
+
+--------------------------------------------------------------------------------
+C5  "enrichment คืออะไร ทำไมต้องทำ"
+--------------------------------------------------------------------------------
+ปัญหา: Sysmon ใส่ CommandLine / Hashes / Parent* มาเฉพาะ EventID 1 (ProcessCreate)
+       event อื่น (FileCreate, NetworkConnect, RegistrySetValue) มีแต่ ProcessGuid
+
+       event ที่ไม่ใช่ EventID 1 ทั้งหมด        58,014 แถว
+       ถ้าไม่ enrich จะไม่มี CommandLine เลยทั้ง 58,014 แถว
+
+วิธีทำ: สร้างตาราง ProcessGuid -> (CommandLine, Hashes, Parent*, User, ...)
+        จาก EventID 1 แล้วเติมย้อนกลับเข้า event อื่นของ process เดียวกัน
+        fallback เป็น ProcessId ถ้าไม่มี GUID
+
+ผลลัพธ์ - ความครบของ field หลัง enrich
+
+        field                Linux     Windows
+        CommandLine          92.7%      71.7%
+        Hashes               92.7%      76.2%
+        ParentImage          73.5%      71.6%
+        ParentCommandLine    73.5%      70.5%
+        IntegrityLevel       92.7%      71.7%
+
+        วิธีที่ match ได้: ตาม GUID 44,368 แถว / ตาม PID 246 แถว / ไม่ได้ 36,717 แถว
+
+ข้อควรระวัง (enrichment leakage)
+    process ที่เกิด "หลัง" Sysmon เริ่มทำงาน จะมี CommandLine
+    daemon ที่เกิด "ก่อน" จะไม่มี
+    ถ้า benign เป็น daemon ล้วน โมเดลจะเรียน "CommandLine ว่าง = benign"
+    -> benign.sh / benign.ps1 จึงต้องสร้าง process ใหม่เยอะๆ ไม่ใช่ปล่อย idle
+
+
+--------------------------------------------------------------------------------
+C6  "เก็บซ้ำได้ไหม / ควบคุมตัวแปรยังไง"
+--------------------------------------------------------------------------------
+ทุกรอบเก็บทำแบบเดียวกันหมด (orchestrator ทำให้อัตโนมัติ)
+
+    1. revert snapshot "clean"        ทุกรอบ - เครื่องกลับสภาพเดิมเป๊ะ
+    2. boot VM
+    3. restart sysmon + rsyslog       จำเป็น! ดูด้านล่าง
+    4. คัดลอก scenario ไป sandbox directory  (/tmp/lab_sandbox, C:\lab_sandbox)
+    5. รัน scenario วนซ้ำจนครบ duration
+    6. Atomic-Cleanup ล้าง artifact
+    7. halt + parse -> enrich -> label
+
+ทำไมต้อง restart sysmon หลังบูต (ข้อค้นพบที่เสียเวลาหาที่สุด)
+    snapshot คืน memory state มาด้วย -> eBPF probe ของ Sysmon อยู่ในสภาพ stale
+    FileCreate(11) + RawAccessRead(9) หายเกลี้ยงทั้งรอบ โดย event อื่นมาปกติ
+    ไม่มี error ใดๆ  ->  restart แล้ว event 11 กลับมา 108 ตัวใน 15 วินาที
+    (rsyslog ก็ต้อง restart ด้วยเหตุผลเดียวกัน - socket เก่าค้างจาก memory state)
+
+การควบคุมความปลอดภัย
+    deny list  T1490 T1485 T1561 T1529 T1491
+    ทุก artifact อยู่ใน sandbox directory
+    check_scenarios.py ตรวจ 6 อย่างก่อนเก็บ (exit 1 ถ้าเจอปัญหา)
+    check_atomics.ps1 คัด test อันตรายออกอัตโนมัติ 5 tag
+        DENY-TECH / DESTRUCTIVE / LOGKILL / REBOOT / GUIBLOCK
+
+
+--------------------------------------------------------------------------------
+C7  "เก็บได้เท่าไหร่ต่อ scenario"
+--------------------------------------------------------------------------------
+    platform   scenario          แถว    malicious%   process
+    linux      benign          10,834       0.0%      4,583
+    linux      ransomware       8,625      65.3%      3,462
+    linux      exploit         13,814      41.4%      5,793
+    linux      trojan           7,197      27.9%      2,617
+    linux      botnet           3,902      50.3%      1,470
+    linux      miner              939      19.4%        383
+    windows    benign           8,462       0.0%      2,437
+    windows    ransomware_win  12,059      40.8%        639
+    windows    trojan_win       4,670      53.4%        801
+    windows    botnet_win       4,302      53.7%        915
+    windows    exploit_win      3,387      30.6%        437
+    windows    miner_win        3,140      39.2%        442
+    ---------------------------------------------------------
+    รวม                        81,331      33.8%     23,971
+
+สัดส่วน label สองแพลตฟอร์มต่างกันแค่ 0.5 จุด (Linux 34.3% / Windows 33.8%)
+    เดิมต่างกัน 33.5 จุด เพราะ orchestrator_win รัน scenario ครั้งเดียว
+    --duration ไม่มีผลจริง -> benign_win ได้แค่ 528 แถว
+    แก้ด้วย repeat loop -> 9,293 แถว (18 รอบ)
+    ถ้าไม่แก้ platform จะกลายเป็น proxy ของ label ทันที
+
+
+================================================================================
+ส่วนที่ 2 - ผลการทดลอง  (B1-B15)
+================================================================================
+
+
 --------------------------------------------------------------------------------
 B1  "accuracy สูงจริงหรือเปล่า"
 --------------------------------------------------------------------------------
