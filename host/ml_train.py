@@ -99,6 +99,30 @@ PAPER_HP = {
 # ==========================================================================
 # encoder ที่ fit ได้/เซฟได้ (ของเดิม factorize ทั้ง dataset เลยเอาไป deploy ไม่ได้)
 # ==========================================================================
+def _is_numeric(s):
+    """เช็คด้วย API ของ pandas ไม่ใช่เทียบชื่อ dtype
+
+    ⚠️ เคยพลาดมาแล้ว: pandas 3 เปลี่ยน dtype ของคอลัมน์ข้อความจาก `object` เป็น `str`
+    โค้ดที่เทียบ `dtype != object` จึงมองคอลัมน์ข้อความเป็นตัวเลข แล้ว to_numeric
+    ทำให้ทั้งคอลัมน์กลายเป็น -1 เงียบๆ 27 คอลัมน์ (CommandLine, User, TargetObject ...)
+    โมเดลยังเทรนผ่าน ยังได้ตัวเลขออกมา แค่ต่ำลงเฉยๆ - ไม่มีอะไรฟ้อง
+    """
+    return (pd.api.types.is_numeric_dtype(s)
+            or pd.api.types.is_bool_dtype(s)
+            or pd.api.types.is_datetime64_any_dtype(s))
+
+
+def assert_matrix_sane(X, names, where=""):
+    """throw ถ้าคอลัมน์กลายเป็นค่าคงที่เยอะผิดปกติ - กันกรณีข้างบนเกิดซ้ำ"""
+    const = [n for i, n in enumerate(names) if np.all(X[:, i] == X[0, i])]
+    if len(const) > 0.30 * len(names):
+        raise RuntimeError(
+            "%s: feature ที่เป็นค่าคงที่ %d/%d ตัว (%.0f%%) - encoder น่าจะอ่าน dtype ผิด\n"
+            "  ตัวอย่าง: %s" % (where, len(const), len(names),
+                                len(const) / len(names) * 100, ", ".join(const[:10])))
+    return const
+
+
 class SysmonEncoder:
     """encode ตามเปเปอร์ หัวข้อ 3.1 แต่จำ mapping ไว้เพื่อใช้กับข้อมูลใหม่
 
@@ -127,7 +151,7 @@ class SysmonEncoder:
             if s.isna().all():                      # ขั้นที่ 2 ของเปเปอร์: ตัดคอลัมน์ null ล้วน
                 continue
             self.features_.append(c)
-            if s.dtype != object and str(s.dtype) not in ("string", "category"):
+            if _is_numeric(s):
                 self.kinds_[c] = "numeric"
                 continue
             s = s.astype("string")
@@ -332,7 +356,14 @@ def main():
         enc = None
         Xtr, Xte = feats.iloc[tr].values, feats.iloc[te].values
         names = list(feats.columns)
-    print("  feature = %d ตัว" % len(names))
+    const = assert_matrix_sane(Xtr, names, "หลัง encode ชุด train")
+    print("  feature = %d ตัว%s" % (len(names),
+          ("  (ค่าคงที่ %d ตัว)" % len(const)) if const else ""))
+    if a.level == "event":
+        from collections import Counter
+        k = Counter(enc.kinds_[c] for c in names)
+        print("    numeric %d / label-encoded %d / ความยาวสตริง %d"
+              % (k["numeric"], k["cat"], k["strlen"]))
 
     scaler = StandardScaler().fit(Xtr)
     Atr, Ate = scaler.transform(Xtr), scaler.transform(Xte)
