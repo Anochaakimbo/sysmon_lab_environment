@@ -432,7 +432,7 @@ def main():
 
     tag = dict(Level=a.level, Protocol=a.split, Features=len(names),
                PCA_Components=(pca.n_components_ if pca else 0))
-    rows, saved = [], {}
+    rows, saved, thresholds = [], {}, {}
 
     # ================= SUPERVISED =================
     if len(np.unique(ytr)) > 1:
@@ -498,6 +498,7 @@ def main():
             pred = (score >= thr).astype(int)
             r = metrics(yte, pred, score)
             r["Tuned_Contamination"] = round(float(best[1]), 2)
+            thresholds[name] = float(thr)   # เซฟไว้ให้ ml_predict.py ใช้ค่าเดียวกัน
         rows.append(dict(Learning_Type="Unsupervised", Algorithm=name, **tag, **r))
         saved[name] = m
         print("    %-22s acc=%.4f  f1=%.4f  AUC=%.4f"
@@ -535,7 +536,7 @@ def main():
         path = os.path.join(a.model_dir, "%s_%s.pkl" % (a.level, a.split))
         joblib.dump(dict(level=a.level, split=a.split, encoder=enc, scaler=scaler,
                          pca=pca, feature_names=names, models=saved,
-                         family_model=fam_model,
+                         family_model=fam_model, thresholds=thresholds,
                          train_malicious_rate=float(ytr.mean()),
                          proc_event_ids=PROC_EVENT_IDS), path)
         print("เซฟโมเดล -> %s  (เอาไปใช้ต่อด้วย ml_predict.py)" % path)

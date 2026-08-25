@@ -33,8 +33,13 @@ import warnings
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import IsolationForest
 from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
                              precision_score, recall_score, roc_auc_score)
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.svm import OneClassSVM
+
+OUTLIER_MODELS = (IsolationForest, LocalOutlierFactor, OneClassSVM)
 
 warnings.filterwarnings("ignore")
 
@@ -102,15 +107,24 @@ def main():
         _sys.exit("ไม่มีโมเดลชื่อ '%s' ใน bundle" % name)
     m = b["models"][name]
 
-    if hasattr(m, "predict_proba"):                       # supervised
+    # ⚠️ เคยพลาด: LocalOutlierFactor(novelty=True) ไม่มี fit_predict (sklearn ซ่อนไว้)
+    #    การเดา branch ด้วย hasattr จึงตกไปทาง supervised แล้ว predict() คืน 1/-1
+    #    -> precision_score เจอค่า -1 แล้ว throw "Target is multiclass"
+    #    เช็คด้วย isinstance ตรงๆ ไม่ต้องเดา
+    if isinstance(m, OUTLIER_MODELS):
+        score = -m.score_samples(X)
+        thr = b.get("thresholds", {}).get(name)
+        if thr is not None:            # ใช้ threshold ที่จูนไว้ตอนเทรน
+            pred = (score >= thr).astype(int)
+            print("  (ใช้ threshold ที่จูนจาก validation ตอนเทรน)")
+        else:
+            pred = (m.predict(X) == -1).astype(int)
+    elif hasattr(m, "predict_proba"):
         score = m.predict_proba(X)[:, 1]
         pred = m.predict(X)
-    elif hasattr(m, "decision_function") and hasattr(m, "fit_predict") is False:
+    else:
         score = m.decision_function(X)
         pred = m.predict(X)
-    else:                                                 # unsupervised (คืน 1/-1)
-        score = -m.score_samples(X)
-        pred = (m.predict(X) == -1).astype(int)
     pred = np.asarray(pred).astype(int)
 
     print("\n=== ผลตรวจด้วย %s ===" % name)

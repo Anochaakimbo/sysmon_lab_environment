@@ -274,3 +274,92 @@ python host/ml_benchmark.py --protocol paper --out reference/bench_paper.csv
 
 ไฟล์ผลที่สร้างไว้แล้ว: `reference/bench_event.csv`, `reference/bench_process.csv`,
 `reference/bench_process_nopca.csv`
+
+---
+
+# ควรเอาตัวไหนไปทำ .pkl / ขึ้นสไลด์
+
+## เข้าใจผิดที่ต้องแก้ก่อน: "unseen data ต้องใช้ unsupervised"
+
+**ไม่ใช่ครับ** คำว่า unseen มีสองความหมายที่คนละเรื่องกัน
+
+| ความหมาย | คืออะไร | ใช้อะไร |
+|----------|---------|---------|
+| **held-out test set** | ข้อมูลที่โมเดลไม่เคยเห็นตอนเทรน แต่เป็นการโจมตี **ชนิดเดิม** | **supervised ได้เต็มที่** และดีกว่ามาก |
+| **novel / zero-day** | มัลแวร์ **ชนิดที่ไม่มีใน train เลย** | unsupervised ถึงจะมีเหตุผล |
+
+เคสของนายคือแบบแรก — เอา CSV จากแล็บเดียวกัน scenario ชุดเดิม มาตรวจ
+มันคือ held-out test set ไม่ใช่ zero-day → **supervised คือคำตอบ**
+ไม่ต้องใช้ unsupervised เพียงเพราะข้อมูลไม่เคยถูกเทรน
+
+เปเปอร์เองก็รายงานทั้งสองแบบ ไม่ได้เลือกอย่างใดอย่างหนึ่ง
+
+## ทำไม unsupervised ไม่ใช่คำตอบสำหรับงานนี้ (วัดแล้ว)
+
+leave-scenario-out = เจอมัลแวร์ชนิดที่ไม่เคยเห็นจริงๆ, feature สะอาด 32 ตัว:
+
+| model | acc | F1 | AUC |
+|-------|-----|-----|-----|
+| Random Forest | 0.511 | 0.541 | 0.578 |
+| Local Outlier Factor | 0.504 | 0.557 | 0.559 |
+| Isolation Forest | 0.424 | 0.460 | 0.370 |
+| **baseline "flag ทุกแถว"** | 0.426 | **0.597** | — |
+
+**ไม่มีตัวไหนชนะ baseline** → ตอนนี้ dataset ยังทำ zero-day detection ไม่ได้
+ทั้ง supervised และ unsupervised จะเคลมว่า "unsupervised ตรวจของใหม่ได้" ไม่ได้
+
+## ตัวที่ควรใช้
+
+```powershell
+python host/ml_train.py --level process --split process --drop-derived --family
+```
+→ `models/process_process.pkl`
+
+**เหตุผลของแต่ละตัวเลือก:**
+
+| ตัวเลือก | ทำไม |
+|---------|------|
+| `--level process` | event เดี่ยวๆ ของมัลแวร์เหมือน benign — process-level F1 0.924 vs event 0.812 |
+| `--split process` | GroupSplit ตาม ProcessGuid ไม่ให้ event ของ process เดียวกันรั่วข้าม train/test |
+| `--drop-derived` | ตัด `CurrentDirectory` (seed dir ของ labeler = รั่ว 100%), `depth`, `img_len` |
+| `--family` | ได้โมเดลบอกตระกูลมัลแวร์ ตรงกับที่ต้องการตอน deploy |
+| ไม่ใช้ PCA | วัดแล้วไม่ช่วย (ดูหัวข้อ feature) |
+
+**โมเดลหลัก = Random Forest** (32 feature, process-level, group split):
+
+| | acc | prec | rec | F1 | AUC |
+|---|-----|------|-----|-----|-----|
+| Random Forest | 0.949 | 0.919 | 0.929 | **0.924** | 0.988 |
+| Decision Tree | 0.871 | 0.817 | 0.792 | 0.804 | 0.930 |
+| SVM | 0.733 | 0.597 | 0.619 | 0.607 | 0.786 |
+| Naive Bayes | 0.359 | 0.340 | 0.980 | 0.505 | 0.594 |
+| LOF (unsupervised) | 0.771 | 0.612 | 0.857 | 0.714 | 0.849 |
+
+**เอา LOF ขึ้นสไลด์ด้วย** แต่ในฐานะ *การทดลองที่สอง* ไม่ใช่ตัวหลัก
+เพราะเปเปอร์เทียบสองแบบ และเป็นตัวที่ทำให้เห็นว่าตรวจจับได้โดยไม่ใช้ label
+
+## ใช้งานตอน deploy
+
+```powershell
+python host/ml_predict.py models/process_process.pkl <ไฟล์ใหม่.csv> --out pred.csv
+python host/ml_predict.py models/process_process.pkl <ไฟล์ใหม่.csv> --model "Local Outlier Factor"
+```
+
+ตัวอย่างจริง (`ransomware_win`, 639 process):
+
+| model | acc | recall | F1 | AUC | ตระกูลที่บอก |
+|-------|-----|--------|-----|-----|--------------|
+| Random Forest | 0.922 | 0.979 | 0.945 | 0.985 | ransomware 297 / miner 106 / trojan 50 |
+| LOF | 0.781 | 0.929 | 0.853 | 0.845 | — |
+
+⚠️ ไฟล์นี้อยู่ในชุด train ตัวเลขจึงสูงเกินจริง ใช้ดูว่าท่อทำงานเท่านั้น
+
+## ⚠️ สิ่งที่ต้องพูดในสไลด์ ไม่งั้นโดนถาม
+
+1. **ตัวเลข 0.924 คือ in-distribution** — ทดสอบกับ process ที่ไม่เคยเห็น
+   แต่เป็นการโจมตีชนิดเดิม ไม่ใช่ zero-day
+2. **ยังไม่ได้วัดแบบ deploy จริง** — ต้องเทรนจากรอบเก็บชุดหนึ่ง แล้วเทสกับ
+   **รอบเก็บใหม่ทั้งรอบ** (`--split run`) ซึ่งต้องเก็บซ้ำหลายรอบก่อน
+3. **family model ยังอ่อน** — miner f1 0.20, botnet 0.58 เพราะตัวอย่างน้อย
+   บอกได้ว่า "มีมัลแวร์" แม่น แต่บอกว่า "ตระกูลไหน" ยังไม่แม่น
+4. **zero-day ยังทำไม่ได้** — ตารางข้างบน ไม่มีโมเดลไหนชนะ baseline
