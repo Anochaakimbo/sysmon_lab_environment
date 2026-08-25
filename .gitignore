@@ -12,3 +12,6 @@ reference/
 host/payloads/
 host/logs_win/
 atomic_report_win.txt
+
+# โมเดลที่เทรนแล้ว - สร้างใหม่ได้ด้วย host/ml_train.py
+models/
