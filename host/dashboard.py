@@ -541,8 +541,8 @@ function renderSc(){
       const more=(s.attack||'').split(',').filter(Boolean).length-3;
       return `<div>
         <input type="checkbox" class="scchk" value="${s.name}" ${clean.includes(s.name)?'checked':''}>
-        <button class="run scrow${PICKED===s.name?' picked':''}" onclick="pick('${s.name}')"
-                title="${s.attack||'(no attack listed)'}">
+        <button class="run scrow${PICKED===s.name?' picked':''}" data-sc="${s.name}"
+                onclick="pick('${s.name}')" title="${s.attack||'(no attack listed)'}">
           <span class="scname">${dot}${s.name}</span>
           <span class="sctags">${tags}${more>0?`<span class="tag more">+${more}</span>`:''}</span>
         </button></div>`}).join('');
@@ -550,7 +550,15 @@ function renderSc(){
 
 // กดแถว = เลือกไว้ก่อน ต้องกดยืนยันอีกทีถึงจะเริ่มเก็บ
 // (เดิมกดแล้วรันทันที เผลอโดนแล้วเสียเวลา revert+boot ~10 นาที)
-function pick(name){ PICKED = (PICKED===name ? null : name); renderSc() }
+//
+// ⚠️ ห้ามเรียก renderSc() ที่นี่ - มันสร้าง innerHTML ใหม่ทั้งก้อน
+//    แล้ว checkbox จะถูกตั้งกลับไปตาม cleanSet() = ติ๊กหมดทุกอัน (เคยพลาดมาแล้ว)
+//    แค่สลับ class ของปุ่มพอ ของที่ผู้ใช้ติ๊กไว้จะไม่หาย
+function pick(name){
+  PICKED = (PICKED===name ? null : name);
+  document.querySelectorAll('#scbtns button.scrow').forEach(b=>
+    b.classList.toggle('picked', b.dataset.sc===PICKED));
+  renderConfirm()}
 
 function renderConfirm(){
   const bar=$('#confirmbar');
@@ -570,7 +578,8 @@ function renderConfirm(){
     </div>`}
 
 async function confirmRun(){
-  const name=PICKED; PICKED=null; renderSc();
+  const name=PICKED;
+  pick(null);                      // ล้างการเลือกโดยไม่แตะ checkbox
   await run(name)}
 
 async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT)}
