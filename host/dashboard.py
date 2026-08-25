@@ -392,6 +392,17 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--acc);cursor:point
   border-radius:5px;padding:2px 6px;font-size:10.5px;font-weight:500;
   font-family:"Cascadia Code",Consolas,monospace;white-space:nowrap}
 .tag.more{background:transparent;border-color:transparent}
+#scbtns button.run.picked{background:var(--acc-soft);border-color:var(--acc);
+  color:var(--acc-dark);box-shadow:inset 0 0 0 1px var(--acc)}
+.confirm{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-top:12px;padding:13px 15px;border-radius:11px;
+  background:var(--acc-soft);border:1px solid var(--acc)}
+.ctext{font-size:13px;line-height:1.7;min-width:0}
+.cmeta{display:block;color:var(--mut);font-size:11.5px}
+.cbtns{display:flex;gap:8px;flex:none}
+#offline{display:none}
+#offline.on{display:block;background:var(--bad);color:#fff;padding:10px 20px;
+  font-size:13px;font-weight:500;position:sticky;top:0;z-index:20}
 
 /* ---------- controls ---------- */
 .ctl{display:flex;gap:9px;align-items:center;margin:14px 0}
@@ -447,6 +458,7 @@ tbody tr:last-child td{border-bottom:none}
     </div>
     <div id="vmline" style="color:var(--mut);font-size:12px;margin:0 0 10px"></div>
     <div id="scbtns"></div>
+    <div id="confirmbar"></div>
     <div class="ctl" style="margin-top:14px;flex-wrap:wrap">
       <button onclick="selectSet(cleanSet())" id="cleanbtn">✓ เลือกชุดสะอาด</button>
       <button onclick="selectSet([])">✗ ล้าง</button>
@@ -479,16 +491,32 @@ const CLEAN_LINUX=["benign","ransomware","botnet","miner","exploit","trojan"];
 const CLEAN_WIN=["benign_win","ransomware_win","botnet_win","miner_win","exploit_win","trojan_win"];
 const CLEAN=CLEAN_LINUX.concat(CLEAN_WIN);
 let scenarios=[];
-async function j(u,m,b){const r=await fetch(u,{method:m||'GET',
-  headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return r.json()}
+async function j(u,m,b){
+  try{
+    const r=await fetch(u,{method:m||'GET',
+      headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});
+    offline(false);
+    return await r.json();
+  }catch(e){
+    // dashboard ตายแล้วแต่หน้าเว็บยังค้างอยู่ - เคยเจอแล้วกดปุ่มเงียบสนิทหาสาเหตุไม่เจอ
+    offline(true);
+    throw e;
+  }}
+function offline(on){
+  let b=$('#offline');
+  if(!b){b=document.createElement('div');b.id='offline';document.body.prepend(b)}
+  b.className=on?'on':'';
+  b.textContent=on?'⚠ ติดต่อ dashboard ไม่ได้ — เซิร์ฟเวอร์อาจปิดไปแล้ว  (รัน  python host/dashboard.py  ใหม่ แล้วกด Ctrl+Shift+R)':'';
+}
 // แท็บ platform - RAM 32GB รันได้ทีละ VM อยู่แล้ว การแยกหน้าจึงตรงกับวิธีทำงานจริง
 // และกันกดข้ามฝั่งโดยไม่ตั้งใจ (เสียเวลา revert+boot ผิดเครื่องราว 10 นาที)
 let PLAT = localStorage.getItem('plat') || 'linux';
+let PICKED = null;      // scenario ที่เลือกไว้รอยืนยัน (เก็บทีละตัว ไม่ใช่คิวรวม)
 const VM_OF = {linux:'target1', windows:'wintarget'};
 function cleanSet(){return PLAT==='windows'?CLEAN_WIN:CLEAN_LINUX}
 
 function setPlat(p){
-  PLAT=p; localStorage.setItem('plat',p);
+  PLAT=p; localStorage.setItem('plat',p); PICKED=null;
   $('#tab-linux').className='tab'+(p==='linux'?' on':'');
   $('#tab-windows').className='tab'+(p==='windows'?' on':'');
   $('#title').textContent=(p==='windows'?'🪟 Windows':'🐧 Linux')+' — Sysmon Lab Dashboard';
@@ -513,10 +541,37 @@ function renderSc(){
       const more=(s.attack||'').split(',').filter(Boolean).length-3;
       return `<div>
         <input type="checkbox" class="scchk" value="${s.name}" ${clean.includes(s.name)?'checked':''}>
-        <button class="run scrow" onclick="run('${s.name}')" title="${s.attack||'(no attack listed)'}">
+        <button class="run scrow${PICKED===s.name?' picked':''}" onclick="pick('${s.name}')"
+                title="${s.attack||'(no attack listed)'}">
           <span class="scname">${dot}${s.name}</span>
           <span class="sctags">${tags}${more>0?`<span class="tag more">+${more}</span>`:''}</span>
-        </button></div>`}).join('')}
+        </button></div>`}).join('');
+  renderConfirm()}
+
+// กดแถว = เลือกไว้ก่อน ต้องกดยืนยันอีกทีถึงจะเริ่มเก็บ
+// (เดิมกดแล้วรันทันที เผลอโดนแล้วเสียเวลา revert+boot ~10 นาที)
+function pick(name){ PICKED = (PICKED===name ? null : name); renderSc() }
+
+function renderConfirm(){
+  const bar=$('#confirmbar');
+  if(!PICKED){bar.innerHTML='';return}
+  const s=scenarios.find(x=>x.name===PICKED)||{};
+  bar.innerHTML=`
+    <div class="confirm">
+      <div class="ctext">
+        จะเริ่มเก็บ <b>${PICKED}</b> บน VM <b>${VM_OF[PLAT]}</b>
+        <span class="cmeta">duration ${$('#dur').value} นาที · revert snapshot ก่อนเริ่ม</span>
+        ${s.attack?`<span class="cmeta">${s.attack}</span>`:''}
+      </div>
+      <div class="cbtns">
+        <button class="run" onclick="confirmRun()">▶ ยืนยันเริ่มเก็บ</button>
+        <button onclick="pick(null)">ยกเลิก</button>
+      </div>
+    </div>`}
+
+async function confirmRun(){
+  const name=PICKED; PICKED=null; renderSc();
+  await run(name)}
 
 async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT)}
 function selected(){return[...document.querySelectorAll('.scchk:checked')].map(c=>c.value)}
