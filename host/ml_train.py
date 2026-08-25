@@ -82,6 +82,21 @@ OURS_DROP = ["record_id", "session", "run_id", "platform", "label", "label_metho
              "CreationUtcTime", "family"]
 DROP = set(PAPER_DROP) | set(OURS_DROP)
 
+# --------------------------------------------------------------------------
+# feature ที่ "ไม่ใช่พฤติกรรมของ process แต่เป็นผลพลอยได้ของ pipeline เราเอง"
+#   ancestor_depth / depth : คำนวณจาก lineage tree ตัวเดียวกับที่ใช้ตัดสิน label
+#                            วัดแล้ว depth >= 6 -> malicious 100%, depth = -1 -> benign 99.3%
+#   enriched / parent_known: บอกว่า enrichment หา parent เจอไหม ไม่ใช่พฤติกรรม
+#   img_len                : ความยาวของ Image ซึ่งเปเปอร์ตัดทิ้งเองเพราะ
+#                            "direct association with the target variable"
+#   CurrentDirectory       : 🚨 รั่วตรงๆ - `/tmp/lab_sandbox/exploit` = malicious 100%,
+#                            `C:\lab_sandbox\` = 99.9% เพราะนี่คือ **seed directory
+#                            ที่ lineage labeler ใช้ตัดสิน label** ไม่ใช่พฤติกรรม
+# ใส่ --drop-derived เพื่อตัดออก แล้วรายงานตัวเลขทั้งสองแบบในธีสิส
+# --------------------------------------------------------------------------
+DERIVED_DROP = ["ancestor_depth", "depth", "enriched", "parent_known", "img_len",
+                "CurrentDirectory"]
+
 CARDINALITY_THRESHOLD = 21   # ตามเปเปอร์: < 21 ค่า -> label encoding, >= 21 -> ความยาวสตริง
 
 # hyperparameter ที่เปเปอร์หาได้จาก random search (หัวข้อ 4.3) ใช้เป็นค่าตั้งต้น
@@ -325,6 +340,9 @@ def main():
                     help="ค่าตั้งต้นของ unsupervised (default: จูนจาก validation ถ้าทำได้)")
     ap.add_argument("--tune-metric", choices=["f1", "accuracy"], default="f1",
                     help="จูน threshold ของ unsupervised ให้ดีที่สุดตามเมตริกไหน")
+    ap.add_argument("--drop-derived", action="store_true",
+                    help="ตัด feature ที่เป็น artifact ของ pipeline (%s)"
+                         % ", ".join(DERIVED_DROP))
     ap.add_argument("--family", action="store_true",
                     help="เทรนโมเดลบอกตระกูลมัลแวร์เพิ่ม (ใช้ตอน deploy)")
     ap.add_argument("--svm-max-train", type=int, default=20000,
@@ -351,6 +369,11 @@ def main():
           % (a.split, len(tr), len(te), yte.mean(), max(yte.mean(), 1 - yte.mean())))
     if a.split == "random":
         print("  !! random split ให้ตัวเลขสูงเกินจริง - event หลายแถวมาจาก process เดียวกัน")
+
+    if a.drop_derived:
+        gone = [c for c in feats.columns if c in DERIVED_DROP]
+        feats = feats.drop(columns=gone)
+        print("  --drop-derived: ตัด %s" % (", ".join(gone) if gone else "(ไม่มีให้ตัด)"))
 
     # ---------- encode: fit จาก train เท่านั้น ----------
     enc = SysmonEncoder()

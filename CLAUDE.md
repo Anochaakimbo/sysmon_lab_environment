@@ -1006,12 +1006,74 @@ event เดี่ยวๆ ของมัลแวร์หน้าตาเ�
 | Unsupervised AUC | ไม่ได้รายงาน | **0.917** |
 
 **LOF ชนะขาดทั้งสาม** ตรงกับข้อสรุปของเปเปอร์ (Table 8)
-และในโหมด leave-scenario-out **LOF (0.810) ชนะ supervised RF (0.568)**
-— เขียนเป็นข้อค้นพบในธีสิสได้ว่า unsupervised ทนต่อการโจมตีที่ไม่เคยเห็นมากกว่า
+~~และในโหมด leave-scenario-out LOF (0.810) ชนะ supervised RF (0.568)~~
+⚠️ **ถอนแล้ว** — ข้อได้เปรียบนั้นมาจาก feature ที่รั่ว ตัดออกแล้ว AUC เหลือ 0.559
+ดูหัวข้อ "feature ที่รายงานไว้ 35/48 ตัว จริงๆ แล้ว 4-5 ตัวแบกไว้หมด" ด้านล่าง
 
 recall ของ LOF ต่อ scenario (โปรโตคอลเปเปอร์ threshold เดียว): 0.489 – 0.966
 ครบทั้ง 10 ฉากสองแพลตฟอร์ม, FP บน benign 4.2 – 21.8%
 AUC แยกฝั่ง Linux 0.883 / Windows 0.952 → ไม่ได้ตรวจเจอเฉพาะฝั่งเดียว
+
+### 🚨 feature ที่รายงานไว้ 35/48 ตัว จริงๆ แล้ว 4-5 ตัวแบกไว้หมด
+
+วัดด้วย `python host/ml_feature_study.py` (25 ส.ค. 2026) — เต็มๆ ที่ `docs/feature_justification.md`
+
+**PCA ไม่ช่วยกับ dataset นี้** (มีหลักฐานแล้ว ไม่ใช่การละเลย):
+sweep n=1..30 ได้ n ที่ดีสุด = 18/35 กับ 29/48 คือเกือบเท่าจำนวนเต็ม
+และที่ event-level ทำให้แย่ลง (F1 0.9512 -> 0.9355)
+เพราะ feature ผ่าน label encoding / ความยาวสตริงมาแล้ว ไม่มีความสัมพันธ์เชิงเส้นให้รวบ
+-> `--pca 0` ถูกต้องแล้ว
+
+**greedy backward elimination: ตัดได้ 30/35 และ 44/48 โดยเสีย F1 ไม่ถึง 1%**
+
+```
+process : depth, cmd_len, img_len, pcmd_len, dur_s
+event   : CommandLine, ancestor_depth, CurrentDirectory, ParentProcessId
+```
+
+ไม่มีตัวไหนเป็น "พฤติกรรม" เลย และ 3 ใน 5 เป็นการรั่วของ pipeline:
+
+| feature | ทำไมรั่ว |
+|---------|----------|
+| `CurrentDirectory` | 🚨 `/tmp/lab_sandbox/exploit` = mal 100%, `C:\lab_sandbox\` = 99.9% — **นี่คือ seed directory ที่ lineage labeler ใช้ตัดสิน label** |
+| `ancestor_depth` / `depth` | มาจาก lineage tree เดียวกับที่สร้าง label (depth>=6 -> mal 100%, depth=-1 -> benign 99.3%) |
+| `cmd_len` / `img_len` / `pcmd_len` | harness artifact — median ความยาว benign 22 vs malicious 76, ใช้ threshold `len>79` เฉยๆ ได้ acc 0.760 = โมเดลเรียน "คำสั่งยาว = ART" |
+
+`img_len` ยังขัดกับเปเปอร์ด้วย — เขาตัด `Image` เองเพราะ "direct association with
+the target variable" การเอากลับมาในรูปความยาวสตริงคือการเลี่ยงข้อสรุปของเขา
+
+เพิ่ม flag **`--drop-derived`** ใน `ml_train.py` / `ml_feature_study.py` แล้ว
+ตัด `ancestor_depth, depth, enriched, parent_known, img_len, CurrentDirectory`
+
+| level | feature | RF F1 | LOF AUC |
+|-------|---------|-------|---------|
+| process | 35 | 0.9475 | 0.8657 |
+| process | **32 (--drop-derived)** | **0.9241** | **0.8492** |
+| event | 48 | 0.8181 | 0.7612 |
+| event | **44 (--drop-derived)** | **0.8122** | **0.6698** |
+
+**ตัดลึกกว่านั้น — เอา `cmd_len`/`pcmd_len` ออกด้วย เหลือพฤติกรรมล้วน 30 ตัว:
+RF F1 ตกจาก 0.9447 เหลือ 0.6100** -> ~35 จุดของตัวเลขที่เคยรายงาน
+มาจากความยาวคำสั่ง ไม่ได้มาจากพฤติกรรมที่ Sysmon เก็บ
+
+### ⚠️ ถอนข้อสรุปที่เคยเขียนไว้ (25 ส.ค. 2026)
+
+เดิมเขียนว่า *"ในโหมด leave-scenario-out LOF (0.810) ชนะ supervised RF (0.568)
+— unsupervised ทนต่อการโจมตีที่ไม่เคยเห็นมากกว่า"*
+
+**ยังสรุปแบบนั้นไม่ได้** — ตัด derived feature ออกแล้ว LOF AUC ตกจาก 0.8215
+เหลือ **0.5592 (เกือบเท่าโยนเหรียญ)** ข้อได้เปรียบนั้นมาจาก feature ที่รั่ว
+ต้องวัดใหม่บนข้อมูลสะอาดก่อนถึงจะเขียนได้
+
+### สิ่งที่ต้องทำก่อนอ้างตัวเลข feature
+
+1. **benign ต้องมีคำสั่งยาวพอกัน** — ตอนนี้ benign เป็นคำสั่งสั้นล้วน
+   `cmd_len` เลยแยกได้ฟรี ถ้า benign มีคำสั่งยาวบ้าง feature นี้จะหมดฤทธิ์เอง
+   **ไม่ควรตัด CommandLine ทิ้ง** เพราะเปเปอร์ไม่มีและเป็น contribution ของงานนี้
+2. **เพิ่ม feature พฤติกรรมที่ยังไม่มี** — entropy ชื่อไฟล์, สัดส่วนไฟล์นอก path ปกติ,
+   จำนวน child process, ความสม่ำเสมอของช่วงเวลา NetworkConnect (beacon)
+   ชุด 30 ตัวที่เหลือได้แค่ F1 0.61 ต้องดันตรงนี้
+3. **รายงานตัวเลข 2 ชุดคู่กันเสมอ** with/without derived features
 
 ### บั๊กที่เจอในผลรอบแรก
 
