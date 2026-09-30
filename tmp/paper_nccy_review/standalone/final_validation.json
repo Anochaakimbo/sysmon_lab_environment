@@ -1,0 +1,40 @@
+{
+  "output": "S:\\Jr.Project(Real)\\sysmon-lab\\docs\\paper_draft_NCCY_v4_standalone.docx",
+  "sha256": "40340114ac8e1157ee92e67047dbcc86417412107c3c9b8512b05f762f5c0282",
+  "pages": 9,
+  "tables": 7,
+  "figures": 2,
+  "references": 18,
+  "reference_first_appearance": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "unrelated_template_parts_preserved": 15,
+  "source_and_template_preserved": true,
+  "baseline_paper_citations_and_comparisons_removed": true,
+  "main_metrics_match_recorded_csv": true,
+  "titles_and_major_headings_centered": true,
+  "header_present_on_every_page": true,
+  "render_directory": "S:\\Jr.Project(Real)\\sysmon-lab\\tmp\\paper_nccy_review\\standalone\\iteration3\\render",
+  "visual_review": {
+    "iteration": 3,
+    "all_pages_inspected_at_original_resolution": true,
+    "accepted": true
+  }
+}

@@ -1,0 +1,971 @@
+PAGE 1
+                                                                Cyber Security and Applications 3 (2025) 100110
+
+
+                                                                     Contents lists available at ScienceDirect
+
+                                                           Cyber  Security  and  Applications
+
+
+                               journal homepage: http://www.keaipublishing.com/en/journals/cyber-security-and-applications/
+
+
+Sysmon event logs for machine learning-based malware detection
+Riki Mi’roj Achmad,    Dyah    Putri Nariswari,    Baskoro    Adi Pratomo ∗,Hudan Studiawan
+
+Department of Informatics, Institut Teknologi Sepuluh Nopember, Surabaya, 60111, East Java, Indonesia
+
+
+a  r    t    i c  l    e           i n  f   o             a  b s  t    r    a  c  t
+
+Keywords:                                                 Malware poses a signiﬁcant threat to modern computing environments, necessitating advanced detection tech-
+Malware detection                                         niques that can adapt to evolving attack methods. This study focuses on dynamic malware analysis using machine
+Dynamic analysis                                          learning models to process detailed data from Sysmon Event Logs, a crucial sources of system information that
+Sysmon                                                    record both running program activities. Sysmon events contain various information on what a program is doing
+Windows event logs                                        during execution, such as created processes, initiated network connection, DNS queries, modiﬁed ﬁle and reg-
+Machine learning                                          istry keys, and other type of events. Such information can be used to classify malicious or benign software. In this
+
+                                                          research, we employed various machine learning algorithms, both classiﬁcation (supervised learning) and outlier
+                                                          detection (unsupervised learning) approaches, such as Naive Bayes, Decision Tree, Random Forest, Support Vec-
+                                                          tor Machine (SVM) for supervised learning, and Isolation Forest, Local Outlier Factor (LOF), and One-Class SVM
+                                                          for unsupervised learning. An extensive set of experiment were conducted to look for the best approach and the
+                                                          most relevant features. Principal Component Analysis (PCA) was applied to select the most relevant features for
+                                                          both supervised and unsupervised learning models. The experiments showed that the Local Outlier Factor (LOF)
+                                                          model with its twenty best features achieved the best performance, with an F1 score of 0.9873.
+
+
+
+1.   Introduction                                                                               eﬀective malware analysis in safeguarding digital assets and infrastruc-
+                                                                                                ture.
+    Malware, or malicious software, encompasses any software designed                               Malware targeting Windows operating systems remains one of the
+to inﬂict harm, disrupt operations, or gain unauthorized access to com-                         most pervasive and signiﬁcant threats in the cybersecurity landscape.
+puter systems, networks, or data. For individual users, the repercussions                       In fact, a recent report by AV-TEST showed that in 2023, over 60 %
+are severe; personal information such as banking details, social secu-                          of malware detections targeted Windows, with more than 1 billion in-
+rity numbers, and private communications can be exﬁltrated for identity                         stances recorded globally [4] . Due to the widespread use of Windows
+theft and ﬁnancial fraud. The implications of malware are vast, under-                          in both personal and enterprise environments, it is a primary target for
+scoring the critical need for robust cybersecurity measures to safeguard                        cybercriminals. Windows event logs record all events that occur within
+against these pervasive threats [1] .                                                           the operating system, providing a detailed account of system activities,
+    Recent incidents of malware have underscored the ongoing threat                             application behavior, security incidents, and user actions. Tools like Sys-
+posed by cyberattacks. One notable example is the SolarWinds supply                             mon (System Monitor) [5] enhance this capability by providing detailed
+chain attack, discovered in late 2020, which targeted SolarWinds’ Orion                         information about process creations, network connections, and changes
+platform, a widely used IT management software. This sophisticated at-                          to ﬁle creation timestamps, among other system activities [6] . By ana-
+tack involved compromising SolarWinds’ software development process                             lyzing these logs, one can identify unusual patterns or anomalies that
+to distribute a trojanized update to its customers, including numerous                          may indicate the presence of malware, such as unauthorized access at-
+government agencies and Fortune 500 companies [2] . Another recent                              tempts, unexpected application behaviors, or irregular system changes.
+incident involves the Colonial Pipeline ransomware attack, which oc-                            Dynamic malware analysis involves observing the behavior of malware
+curred in May 2021. DarkSide, a ransomware-as-a-service (RaaS) group,                           in real-time within a controlled and isolated environment. This method
+targeted Colonial Pipeline, one of the largest fuel pipeline operators in                       allows researchers to understand the actions and impact of the malware
+the United States. The attack led to the shutdown of Colonial Pipeline’s                        as it operates, without risking harm to actual systems [7] . Dynamic anal-
+operations, causing fuel shortages and impacting critical infrastructure                        ysis, in contrast to static analysis, does not depend on examining the bi-
+sectors [3] . These recent incidents underscore the critical importance of                      nary code directly. Instead, it focuses on identifying signiﬁcant patterns
+
+
+
+    Peer review under the responsibility of KeAi Communications Co., Ltd.
+  ∗ Corresponding author.
+    E-mail address: baskoro@if.its.ac.id (B.A. Pratomo) .
+
+https://doi.org/10.1016/j.csa.2025.100110
+Received 27 September 2024; Received in revised form 13 April 2025; Accepted 19 July 2025
+Available online 23 July 2025
+2772-9184/©   2025 The Authors. Publishing Services by Elsevier B.V. on behalf of KeAi Communications Co., Ltd. This is an open access article under the CC
+BY-NC-ND license ( http://creativecommons.org/licenses/by-nc-nd/4.0/ )
+
+PAGE 2
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+or behaviors that indicate the malicious nature of the ﬁle under scrutiny.                            [20] address the challenge of building malware behavioral graphs from
+Static analysis, which involves inspecting the binary code for known sig-                             API call sequences by introducing a simpler approach using word em-
+natures, can be easily circumvented by various evasion techniques such                                bedding to understand the contextual relationships between API func-
+as packing and obfuscation [8] .                                                                      tions. They propose clustering functions with similar traits and employ
+    This paper examines how we can employ the information retrieved                                   a Markov chain model to distinguish between malware and goodware
+from dynamic analysis techniques to detect malicious events, utiliz-                                  sequences. Their method achieves a detection precision of 0.990 with
+ing both supervised and unsupervised machine learning algorithms. We                                  a false positive rate of 0.010. Additionally, they developed a prediction
+were looking for the best performing machine learning models, both                                    model with an accuracy of 0.997, allowing for proactive blocking of
+supervised and unsupervised approaches, along with the most relevant                                  malicious payloads before execution.
+features gathered from Sysmon events. To the best of our knowledge, no                                    Herrera-Silva and Hernández-Álvarez [21] focus on detecting ran-
+other research has used the information from Sysmon events to detect                                  somware by applying dynamic analysis and machine learning to iden-
+malware activities. A previous work in this area [9] is more focused on                               tify evolving ransomware signatures. The study aims to generate dy-
+how benign background activities aﬀect the detection performance. The                                 namic feature datasets by running experiments with both encryptor and
+article did not look for the most relevant features, while this research put                          locker ransomware in a sandbox environment. The selected features, rel-
+more focus on selecting the best attributes from Sysmon events and de-                                evant and non-redundant, help distinguish ransomware from goodware.
+termining which preprocessing approach can improve detection. There-                                  The ﬁnal dataset includes 2000 entries with 50 characteristics each and
+fore, although the algorithms we used were rather basic, our analysis                                 achieves over 99 % accuracy in detection using machine learning mod-
+of the features will add more knowledge to the ﬁeld. Apart from that,                                 els like gradient boosted regression trees, random forest, and neural net-
+we also compared the result of using supervised and unsupervised ap-                                  works.
+proaches to determine which one performs better in the case of malware                                    Input features are crucial in dynamic malware analysis as they di-
+detection. The supervised learning algorithms employed include Naïve                                  rectly inﬂuence the accuracy and eﬀectiveness in detecting and clas-
+Bayes [10] , Decision Tree [11] , Random Forest [12] , and Support Vector                             sifying malware. Usman et al. [22] enhance IP reputation systems by
+Machine [13] . For unsupervised learning, this research utilizes outlier                              applying dynamic analysis and machine learning to analyze malware
+detection algorithms such as Isolation Forest [14] , Local Outlier Factor                             behavior linked to speciﬁc IP addresses. The study gathers key features
+[15] , and One-Class Support Vector Machine [16] .                                                    such as md5Hash, malscore, and network activities (UDP, HTTP, TCP)
+    The primary contributions of this paper are summarized as follows:                                in a sandbox environment. These features help create a dataset that im-
+  • Implementation of malware detection on Sysmon event logs using a                                  proves detection accuracy, particularly for zero-day attacks, while re-
+    combination of supervised and unsupervised learning algorithms.                                   ducing false alarms. In studies Kumar et al. [23] and Vinayakumar et al.
+  • Application of Principal Component Analysis for feature selection to                              [7] , the authors proposed distinct methods for detecting malware by fo-
+    enhance the dataset’s eﬀectiveness.                                                               cusing on the analysis of API calls. Both approaches involved examining
+  • Comprehensive evaluation of the experimental results, providing the                               the speciﬁc sequences of API calls made by applications, with the goal of
+    most relevant features and the best performing machine learning                                   identifying patterns of malicious behavior. By analyzing how these API
+    algorithm.                                                                                        calls are used in sequence, the methods aim to eﬀectively distinguish
+                                                                                                      between benign and malicious activities, providing a robust framework
+    The rest of this paper is structured as follows: Section 2 lists related                          for malware detection.
+research in this area. Section 3 describes our research methodology, ex-                                  Rhode et al. [24] use a recurrent neural network (RNN) to predict
+plaining in details how we conducted the experiments. Our results are                                 malicious behavior from a snapshot of behavioral data. The study ﬁnds
+then presented in Section 4 . Lastly, Section 5 provides conclusion of this                           that the model achieves 94 % accuracy, with key features including to-
+research.                                                                                             tal processes, maximum process ID, CPU usage, memory, and network
+                                                                                                      activity. Malicious samples show more outliers in process counts, while
+2.   Related work                                                                                     benign samples vary more in memory and network metrics. Zhang et al.
+                                                                                                      [25] propose a dynamic malware analysis method using a feature hash-
+    This section reviews existing research related to dynamic malware                                 ing technique to encode API call arguments and a deep neural network
+analysis. By examining these contributions, we identify the strengths                                 with Gated-CNNs and bidirectional LSTMs. The approach eﬃciently cap-
+and limitations of current approaches and highlight areas for further ex-                             tures both API names and arguments, achieving signiﬁcant improve-
+ploration. Karunakaran and Geetha [17] discuss the limitations of cur-                                ments over existing methods on a large real dataset. The study highlights
+rent security systems in detecting harmful packets. They introduce a                                  the eﬀectiveness of this method in detecting malware while providing
+Secure SDN Architecture that uses Support Vector Machine (SVM) and                                    valuable insights into feature engineering and architecture design.
+Random Forest, achieving detection accuracies of 96 % and 96.5 % re-                                      Unlike most of existing methods that do not incorporate Sysmon
+spectively. Rabadi and Teo [18] highlight the limitations of API-based                                events for generating input features, our approach addresses this gap
+malware detection methods, which often fail due to sequence manipu-                                   by utilising Sysmon event attributes. Unlike our experiments, previous
+lation or ignoring API arguments. They propose a lightweight dynamic                                  research on Sysmon event attributes for malware detection [9] did not
+feature extraction technique using machine learning that doesn’t require                              conduct a more thorough feature and algorithm analysis. By leverag-
+expert knowledge of API arguments. Evaluated on datasets with 7774                                    ing both supervised and unsupervised learning techniques, our method
+benign and 7105 malicious samples, their approach achieved a malware                                  enhances dynamic malware analysis and improves detection accuracy
+detection accuracy of over 99.89 % and a type classiﬁcation accuracy                                  and eﬀectiveness. Table 1 outlines the diﬀerences between our proposed
+of 98.03 %, outperforming many existing methods.                                                      method and previous approaches.
+    Irshad and Dutta [19] address the challenge of identifying new mal-
+ware categories by using dynamic malware analysis combined with ma-                                   3.   Proposed method
+chine learning for Windows-based malware detection and classiﬁcation.
+Their approach involves executing ﬁles in a Cuckoo sandbox and analyz-                                    This section presents a comprehensive explanation of the method-
+ing the generated behavior reports. By selecting key features from these                              ology employed in this study. The supervised learning techniques con-
+reports, they found that ﬁve features were suﬃcient to accurately distin-                             sidered include Naive Bayes, Decision Tree, Random Forest, and Sup-
+guish malware from benign ﬁles. For classiﬁcation, they used the top ten                              port  Vector  Machine,  all  of  which  are  trained  on  labeled  datasets
+frequency features, achieving an accuracy of 85 % with a random for-                                  to   recognize   malware   patterns.   In   parallel,   unsupervised   learning
+est classiﬁer and 83 % with a decision tree classiﬁer. Amer and Zelinka                               approaches —speciﬁcally     outlier  detection  algorithms  such  as  Isola-
+
+
+                                                                                                  2
+
+PAGE 3
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+                                              Table 1
+                                              Comparison of input features in dynamic malware analysis methods.
+
+                                                Research                                                Input features
+
+                                                Karunakaran and Geetha [17]                             Network usage
+                                                Rabadi and Teo [18]                                     API calls
+                                                Irshad and Dutta [19]                                   DLL, API calls, Registry key, Executable ﬁles, Directory
+                                                Amer and Zelinka [20]                                   API calls
+                                                Herrera-Silva and Hernández-Álvarez [21]                DLL, API calls, Network connection, Process behaviour
+                                                Usman et al. [22]                                       Network usage
+                                                Zhang et al. [25]                                       API calls
+                                                Rhode et al. [24]                                       CPU, Memory, Network usage
+                                                Vinayakumar et al. [7]                                  API calls
+                                                Kumar et al. [23]                                       File creation, Thread started, Registry value set
+                                                Pratomo et al. [9]                                      All Sysmon event attributes
+                                                Our proposed method                                     Most relevant Sysmon event attributes
+
+
+
+tion Forest, Local Outlier Factor, and One-Class Support Vector Ma-                                              Table 2
+chine —are     also applied to labeled data in order to identify anoma-                                          Dataset features and data types.
+lies and uncover patterns indicative of previously undetected malware.                                             No.                             Feature                                                   Data type
+Furthermore, feature selection is performed using Principal Component                                              1                               Company                                                   string
+Analysis (PCA) to extract the most relevant attributes from the dataset,                                           2                               Description                                               string
+thereby enhancing the performance of the learning algorithms. While                                                3                               IntegrityLevel                                            string
+alternative techniques such as Lasso and Recursive Feature Elimination                                             4                               LogonGuid                                                 string
+(RFE) were considered, their application would have introduced addi-                                               5                               LogonId                                                   string
+tional complexity in hyperparameter tuning and increased the compu-                                                6                               ParentProcessGuid                                         string
+tational cost of model training. Moreover, PCA does not incorporate the                                            7                               ParentProcessId                                           ﬂoat64
+                                                                                                                   8                               ProcessGuid                                               string
+relationship between features and target labels, rendering it less prone                                           9                               ProcessId                                                 int64
+to bias in the feature selection process.                                                                          10                              Product                                                   string
+     The  dataset  used  in  this  research  is  adapted  from  the  work  of                                      11                              TerminalSessionId                                         ﬂoat64
+Pratomo et al., which involved the collection of detailed Windows Event                                            12                              User                                                      string
+Logs and Sysmon data to capture both normal and malicious system be-                                               13                              EventID                                                   int64
+                                                                                                                   14                              UtcTime                                                   string
+haviors [9] . The complete list of features and their corresponding data                                           15                              host_name                                                 string
+types is listed in Table 2 . Due to PCA requiring all features to be numer-                                        16                              node_id                                                   string
+ical, several steps are taken to preprocess the data and eliminate less                                            17                              timestamp                                                 ﬂoat64
+important features.                                                                                                18                              parent_node_id                                            string
+                                                                                                                   19                              Image                                                     string
+                                                                                                                   20                              FileVersion                                               ﬂoat64
+3.1.   Data preprocessing                                                                                          21                              ImageLoaded                                               ﬂoat64
+                                                                                                                   22                              OriginalFileName                                          ﬂoat64
+                                                                                                                   23                              Signature                                                 ﬂoat64
+     Before applying any machine learning algorithms or conducting fea-                                            24                              SignatureStatus                                           ﬂoat64
+ture selection, a comprehensive data preprocessing phase was carried                                               25                              Signed                                                    ﬂoat64
+out to ensure the dataset’s quality, consistency, and suitability for anal-                                        26                              EventType                                                 string
+ysis. Given the nature of the Sysmon event logs, which contain a com-                                              27                              RuleName                                                  string
+bination of structured and semi-structured data, this step was critical                                            28                              TargetObject                                              string
+                                                                                                                   29                              DestinationHostname                                       string
+in transforming raw event logs into a clean and analyzable format that                                             30                              DestinationIp                                             string
+supports robust model training and evaluation.                                                                     31                              DestinationPort                                           ﬂoat64
+     The ﬁrst preprocessing step involved standardizing the representa-                                            32                              DestinationPortName                                       string
+tion of missing values by replacing all instances of the dash character                                            33                              Initiated                                                 string
+                                                                                                                   34                              Protocol                                                  string
+( − ) with null. This transformation was necessary to maintain consis-                                             35                              SourcePortName                                            string
+tency across the dataset and to explicitly indicate missing data, thereby                                          36                              TargetFilename                                            string
+allowing downstream algorithms to handle these values properly. All                                                37                              TargetProcessGuid                                         string
+features (columns) that contained only null values were removed. Such                                              38                              TargetImage                                               string
+features lack any variability or informative content and, as a result, do                                          39                              StartFunction                                             string
+                                                                                                                   40                              CreationUtcTime                                           string
+not contribute to the learning process.                                                                            41                              PreviousCreationUtcTime                                   string
+     To preserve data integrity and prevent overﬁtting, duplicate rows
+were identiﬁed and eliminated. Retaining duplicate entries can intro-
+duce bias into the model, especially if the same pattern is repeated mul-
+tiple times, which may skew the learning process and reduce generaliz-                                           like node_id, ProcessGUID, and parent_node_id, which describe inter-
+ability to unseen data. In addition to removing duplicates, we excluded                                          process relationships, were not considered due to the absence of corre-
+several features that could potentially leak target-related information to                                       lation modeling across multiple events. Lastly, the host_name attribute
+the model, thereby reducing its generalizability. These included Image,                                          was excluded as it does not directly inﬂuence malware behavior and
+node_id, ProcessGUID, ProcessId, UtcTime, timestamp, parent_node_id,                                             may introduce unnecessary noise.
+and host_name. The feature Image was removed due to its direct associ-                                                For categorical features with low cardinality —deﬁned    in this study
+ation with the target variable (label), which could lead to data leakage.                                        as those with fewer than 21 unique values —label     encoding was applied.
+Process identiﬁers and timestamp-related attributes, such as ProcessId,                                          In this encoding scheme, all null values were replaced with − 1, and each
+UtcTime, and timestamp, were excluded as they provide context-speciﬁc                                            unique non-null category was mapped to a corresponding integer. This
+information without general relevance. Moreover, relational identiﬁers                                           approach was selected to reduce dimensionality and maintain simplicity
+
+
+                                                                                                            3
+
+PAGE 4
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+in feature representation, while still preserving categorical distinctions                                 represent the principal components, while the eigenvalues indicate the
+that could be useful for pattern recognition. The threshold of 21 was                                      amount of variance captured by each component. Finally, the principal
+chosen based on an empirical assessment of the dataset, where columns                                      components are ranked based on their eigenvalues, and the top compo-
+with low cardinality were considered more amenable to label encoding                                       nents that capture the most variance are selected for further analysis.
+without risk of overﬁtting.                                                                                This process helps in reducing the dimensionality of the dataset while
+    Conversely, for object-type features with high cardinality (more than                                  retaining most of its variability [26] .
+21 unique values), a diﬀerent encoding approach was employed. Miss-                                             The feature selection process using PCA in this study involves sev-
+ing values were again replaced with − 1, while non-null entries were en-                                   eral iterative steps designed to identify the most relevant features for a
+coded based on the length of the string. This method preserves a rough                                     given dataset. Initially, the process starts by determining the number of
+proxy of information content while avoiding high-dimensional one-hot                                       principal components, denoted as 𝑛 = 1 . The PCA algorithm is then exe-
+or target encoding schemes, which can be computationally expensive or                                      cuted using this number of components, which yields a subset of features
+introduce noise. For numeric features that had missing values, null en-                                    corresponding to the selected principal components. With these selected
+tries were likewise replaced with − 1, while valid values were retained                                    features, the dataset is used to train and predict model outcomes, and the
+as-is to preserve their original distribution and interpretability.                                        F1 score is calculated to evaluate the model’s performance. This score
+                                                                                                           provides insight into the eﬀectiveness of the selected features. If the
+3.2.   Feature selection and hyperparameter tuning                                                         current number of features 𝑛 is less than the total number of available
+                                                                                                           features, the process continues by incrementing 𝑛 by one and repeating
+    Principal Component Analysis (PCA) is a widely used dimensionality                                     the PCA and model training steps. This iterative approach continues un-
+reduction technique in machine learning and data analysis. The primary                                     til all possible numbers of features have been evaluated. The F1 scores
+objective of PCA is to transform a large set of correlated variables into                                  from each iteration are analyzed, and the set of features that produce the
+a smaller set of uncorrelated variables known as principal components.                                     highest F1 score is identiﬁed as the optimal feature subset. This process
+This transformation is achieved by identifying the directions (principal                                   ensures that the most informative and relevant features are selected for
+components) along which the variance of the data is maximized. By re-                                      the ﬁnal model, enhancing its predictive performance. The ﬂowchart of
+taining only the most signiﬁcant principal components, PCA reduces the                                     this feature selection process is illustrated in Fig. 1 .
+dimensionality of the dataset while preserving as much of the original                                          Hyperparameter  tuning  is  a  critical  step  in  optimizing  machine
+information as possible.                                                                                   learning models, as it involves selecting the best set of hyperparame-
+    While PCA introduces some information loss, its use is justiﬁed by                                     ters —those     parameters that deﬁne the model structure and how it learns
+the need to reduce dimensionality, eliminate noise, and improve model                                      from data. Unlike parameters learned during training, hyperparameters
+generalizability. The original data set contains many low-variance and                                     are set before the learning process begins and have a signiﬁcant impact
+correlated features that can hinder model performance. PCA captures                                        on the model’s performance. Proper tuning of these hyperparameters
+the most signiﬁcant variance in the data, allowing models to focus on                                      can lead to more accurate and eﬃcient models. One common approach
+the most informative aspects. Components were selected based on F1-                                        for hyperparameter tuning is random search. In contrast to grid search,
+score optimization to ensure minimal impact on performance. Unlike                                         which exhaustively tries every combination of hyperparameters, ran-
+other methods, PCA does not rely on target labels, making it particularly                                  dom search selects random combinations of hyperparameters from pre-
+suitable for both supervised and unsupervised learning in this study.                                      deﬁned distributions. This approach oﬀers a more eﬃcient exploration
+    Mathematically, PCA involves the following steps. First, the dataset                                   of the hyperparameter space, especially when the space is large or when
+is standardized to ensure that each feature contributes equally to the                                     computational resources are limited [27] .
+analysis. This is done by subtracting the mean of each feature and di-                                          The process begins with the selection of a set of machine learning
+viding by the standard deviation. Next, a covariance matrix is computed                                    models. Each model has its speciﬁc hyperparameters, which need to be
+to identify the relationships between the features, which helps in under-                                  optimized. A predeﬁned number of iterations, n, is set, and during each
+standing how they vary together. Following this, the covariance matrix                                     iteration, a random combination of hyperparameters is selected from the
+is decomposed into its eigenvalues and eigenvectors. The eigenvectors                                      distributions. The selected parameters are then used to train the model
+
+
+
+
+           Start                     Determine n=1                              Run PCA algorithm                                                                           Get n selected
+                                                                                 with n component                                                                        features from PCA
+
+
+
+
+
+
+
+
+                                                                                         n = n+1
+
+                                                                                                                                       no
+
+
+
+
+
+                                 Analyze F1 score and                                                                            n = num of                               Train and predict
+           End                       choose the best                                 Get F1 score                   yes           features?                                 dataset with n
+                                           features                                                                                                                             features
+
+
+
+                                                                        Fig. 1. Flow chart of feature selection using PCA.
+
+
+                                                                                                       4
+
+PAGE 5
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+
+                                    Machine learning                          Create parameter                             Set number of                                Set model's
+                Start                      models                                 distributions                            iterations = n                         parameters randomly
+                                                                                                                                                                 based on distributions
+
+
+
+
+
+
+                                                                                                                                no
+
+
+
+
+
+
+                                       Get the best                                                                                                                  Train and predict
+                End              parameters based on                 yes          iteration = n                            Get F1-Score                                    models
+                                         F1-Score
+
+
+
+                                                             Fig. 2. Flow chart of hyperparameter tuning using random search.
+
+
+on the dataset. After training, the model’s performance is evaluated us-                                   on the input features. Hyperparameter tuning using random search is
+ing a performance metric, typically the F1-Score, which balances preci-                                    incorporated into the process to ﬁne-tune the models, searching for the
+sion and recall. The process of selecting parameters, training the model,                                  optimal set of parameters that lead to the best performance. After train-
+and evaluating performance is repeated until the set number of itera-                                      ing, the models’ predictions are tested using the testing data. This step is
+tions is reached. Once all iterations are completed, the hyperparameter                                    essential for evaluating performance in a real-world scenario. By com-
+combination that achieved the highest F1-Score is identiﬁed as the best                                    paring predictions against actual outcomes, metrics such as precision,
+set of parameters. This process allows for eﬃcient and eﬀective tuning,                                    recall, and F1-Score can be calculated to assess model performance.
+enabling the model to perform at its best without the need for an ex-                                           To further reﬁne the models, feature selection is conducted using
+haustive search. The ﬂowchart of this hyperparameter tuning process is                                     Principal Component Analysis (PCA). PCA is a dimensionality reduction
+illustrated in Fig. 2 .                                                                                    technique that identiﬁes the most signiﬁcant features in the dataset.
+                                                                                                           By selecting only the most important features, PCA helps to improve
+3.3.   Malware analysis using supervised learning                                                          model performance by reducing noise and focusing on the features that
+                                                                                                           have the most impact on the target variable. Finally, the eﬀectiveness
+    The proposed method for training and testing models in this experi-                                    of each model is measured using the F1-Score, a metric that balances
+ment focuses on optimizing the performance of the supervised learning                                      precision and recall. The F1-Score provides a comprehensive evaluation
+algorithms. The process begins with dataset preprocessing, a crucial step                                  of the models’ ability to make accurate predictions, particularly in cases
+to ensure the data is in a suitable format for analysis. This stage involves                               where there is an imbalance between classes. This entire process, from
+cleaning the data by handling missing values, normalizing features, and                                    preprocessing to evaluation, ensures that the models are trained and
+transforming categorical variables into numerical formats when neces-                                      tested in a rigorous and systematic manner, leading to more reliable
+sary. The goal is to create a high-quality dataset that can eﬀectively be                                  and robust predictions. The entire ﬂowchart outlining this process can
+used by the models without introducing bias or errors.                                                     be seen in Fig. 3 .
+    Once the dataset is preprocessed, it is split into two distinct subsets:
+training data and testing data. The training data is used to build the                                     3.4.   Malware analysis using unsupervised learning
+models, allowing them to learn patterns and relationships within the
+data. The testing data, on the other hand, is kept separate to evaluate                                         This study also aims to utilize unsupervised learning models for mal-
+the models’ performance. This split is vital to ensure that the models                                     ware analysis by leveraging outlier detection algorithms. The goal is to
+are not overﬁtted to the training data and can generalize well to unseen                                   develop a robust system that can eﬀectively identify malicious activi-
+data.                                                                                                      ties by analyzing patterns and anomalies within the data. This approach
+    Class imbalance is another issue that will aﬀect performance in any                                    diﬀers from previous methods that employed supervised learning with
+supervised learning approach. A class with the majority of data may in-                                    class balancing techniques.
+ﬂuence the model to pick the class for any data point and still achieve                                         The process begins with dataset pre-processing, where the data is
+high accuracy. In this case, benign samples will have more data. Any                                       cleaned and prepared for analysis. This step ensures that the dataset is
+machine learning models can identify any samples as benign and the ac-                                     in the appropriate format and free of any inconsistencies or errors that
+curacy of the model would still be high. To address the issue of class im-                                 could impact the results. Following pre-processing, the dataset is divided
+balance, class weights are applied during the model training phase. This                                   into two categories: malware and benign data. This separation is critical
+technique ensures that the model gives appropriate importance to the                                       for creating a clear distinction between normal and potentially harmful
+minority class (malicious), preventing bias towards the majority class,                                    activities, which is essential for training and evaluating the models.
+while Lasso and Recursive Feature Elimination (RFE) are more focused                                            Next, feature selection is carried out using PCA. PCA helps to re-
+on selecting important features. We also employ F1-score, precision, and                                   duce the dimensionality of the dataset by retaining only the most sig-
+recall for the evaluation metrics to ensure there is no issue with class                                   niﬁcant features, which enhances the performance and interpretability
+imbalance.                                                                                                 of the models. Hyperparameter tuning is then performed using random
+    Next, the models are trained using the training data. In this exper-                                   search. This technique involves exploring various combinations of hy-
+iment, several supervised learning algorithms are employed, including                                      perparameters to optimize the performance of the models. The models
+Naive Bayes, Decision Tree, Random Forest, and Support Vector Ma-                                          used in this experiment include Isolation Forest, Local Outlier Factor
+chine (SVM). Each model is trained to predict the target variable based                                    (LOF), and One-Class Support Vector Machine (SVM). These unsuper-
+
+
+                                                                                                       5
+
+PAGE 6
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+
+                                                                                                                                   Split dataset into                               Use class weight for
+           Start                       Dataset                                 Pre-process dataset                                training and testing                                 class balancing
+                                                                                                                                             data
+
+
+
+
+
+                                 Test models                                  Train models using                                    Hyperparameter                                 Feature selection with
+                              prediction using                                     training data                                 tuning with Random                                             PCA
+                                 testing data                                                                                              Search
+
+
+
+
+
+
+                               Get F1-Score                                 End
+
+
+
+                                                                          Fig. 3. Flow chart of the supervised learning method.
+
+
+
+           Start                             Dataset                               Pre-process dataset                             Split data into malware                           Feature selection with
+                                                                                                                                           and benign                                           PCA
+
+
+
+
+
+
+
+
+
+                                                                                     Use combination of
+           End                          Get F1-Score                                malware and benign                            Use benign data to train                          Hyperparameter tuning
+                                                                                        data for models                                    the models                                 with random search
+                                                                                           prediction
+
+
+                                                                        Fig. 4. Flow chart of the unsupervised learning method.
+
+
+vised learning models are speciﬁcally designed for outlier detection and                                          understanding of the outcomes and insights derived from our experi-
+are employed to analyze both malware and benign data.                                                             ments.
+     Unlike previous methods that employed supervised learning and re-
+quired class balancing techniques to address imbalanced datasets, this                                            4.1.   Dataset used
+unsupervised approach does not use class balancing. Instead, it relies
+on training the models exclusively with benign data and testing them                                                   The dataset utilized in this research was generated from an exper-
+with a combination of both malware and benign data. This approach                                                 imental setup involving ﬁve diﬀerent hosts, each a virtual machine
+allows the models to detect anomalies and classify malware without the                                            running the Windows operating system. Various types of malware, in-
+need for explicit class balancing. The ﬁnal step involves evaluating the                                          cluding Ransomware, Trojan, Botnet, Exploit, and Miner, were injected
+models using the F1-Score, which provides a comprehensive measure of                                              into these hosts. Following successful malware injection, event log data
+model performance by combining precision and recall. This metric helps                                            was extracted from the Windows Event Logs on each host. This process
+assess how well the models can detect malware while minimizing false                                              yielded three distinct sets representing a mix of normal events and those
+positives and false negatives. The ﬂowchart illustrating this process is                                          triggered by the malware infection. The diﬀerence between these sets
+shown in Fig. 4 .                                                                                                 lies in the time at which the data was collected. The details of each set
+                                                                                                                  are as follows:
+4.   Experimental results                                                                                            • Set 1: Contains 29,056 rows and 42 columns, with 23 columns of
+                                                                                                                        string data types, 16 columns of ﬂoat64 data types, and 3 columns
+     In this section, we delve into the comprehensive analysis of our ma-                                               of int64 data types.
+chine learning experiments, focusing on both supervised and unsuper-                                                 • Set 2: Contains 21,150 rows and 42 columns, with 23 columns of
+vised learning approaches. We begin by detailing the dataset utilized in                                                string data types, 16 columns of ﬂoat64 data types, and 3 columns
+our study, outlining its characteristics and relevance to our research ob-                                              of int64 data types.
+jectives. Following this, we present the results of our supervised learning                                          • Set 3: Contains 20,811 rows and 42 columns, with 23 columns of
+models, including Naive Bayes, Decision Tree, Random Forest, and Sup-                                                   string data types, 16 columns of ﬂoat64 data types, and 3 columns
+port Vector Machine, highlighting their performance and key metrics.                                                    of int64 data types.
+
+The section then transitions to the unsupervised learning techniques em-                                               These three sets were subsequently merged into a CSV ﬁle. The com-
+ployed, such as Isolation Forest, Local Outlier Factor, and One-Class                                             bined dataset consists of 71,017 rows and 42 columns, with 23 columns
+SVM, discussing their eﬀectiveness in anomaly detection and feature                                               of string data types, 16 columns of ﬂoat64 data types, and three columns
+extraction. Through this detailed exploration, we aim to provide a clear                                          of int64 data types.
+
+
+                                                                                                              6
+
+PAGE 7
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+Table 3
+Sample data from a sysmon event.
+
+  Company                                 Description                                           IntegrityLevel                             LogonId                             ProcessGuid
+
+  Google LLC                              Google Crash Handler                                  System                                     0x3e7                               F44F4893-5653-62B3-4000-000000001E00
+  Google LLC                              Google Crash Handler                                  System                                     0x3e7                               F44F4893-5653-62B3-4100-000000001E00
+  Google LLC                              Google Crash Handler                                  System                                     0x3e7                               43B81E23-5662-62B3-4400-000000002000
+  Google LLC                              Google Crash Handler                                  System                                     0x3e7                               43B81E23-5662-62B3-4500-000000002000
+  Google LLC                              Google Crash Handler                                  System                                     0x3e7                               C89119D8-5665-62B3-E600-000000001A00
+
+
+Table 4
+Selected feature for supervised and unsupervised learning.
+
+
+                                                                                                                                                                                                             Unsupervised              Supervised
+  Feature                                     Description                                                                                                                                                    learning                  learning
+
+  TargetFilename                              File name involved in the event. This feature can provide clues about suspicious activities that manipulate                                                    ✓                         ✓
+                                              ﬁles.
+  EventID                                     Unique code indicating a type of event. This feature can help classify suspicious activities.                                                                  ✓                         ✓
+  TargetProcessGuid                           Unique identiﬁer of a process referenced by an event.                                                                                                          ✓                         ✓
+  EventType                                   Category of the event. This feature can help classify normal and suspicious activities.                                                                        ✓                         ✓
+  TargetImage                                 Name of a ﬁle related to a process or event. This feature can provide information about ﬁles related to                                                        ✓                         ✓
+                                              suspicious events.
+                                              Time a previous event was created. This feature provides information about the chronological order of                                                          ✓                         ✓
+  PreviousCreationUtcTime                     suspicious events.
+  DestinationHostname                         Name of a host targeted by the event. This feature helps identify suspicious activities communicating with the                                                 ✓
+                                              targeted host.
+  Company                                     Proﬁle information related to an event.                                                                                                                        ✓                         ✓
+  Description                                 Proﬁle information related to an event.                                                                                                                        ✓                         ✓
+  Product                                     Proﬁle information related to an event.                                                                                                                        ✓                         ✓
+  IntegrityLevel                              Information about the integrity level of an event. This feature helps identify suspicious access.                                                              ✓                         ✓
+  CreationUtcTime                             Timestamp of the event creation. This feature helps analyze the chronological order of suspicious events.                                                      ✓
+  StartFunction                               Function used to initiate an event. This feature provides detailed information on how an event starts.                                                         ✓                         ✓
+  ParentProcessGuid                           Unique ID of the parent process. This feature provides information about relationships between running                                                         ✓                         ✓
+                                              processes.
+  User                                        Identity of the user running an event. This feature helps observe deeper insights into users performing                                                        ✓                         ✓
+                                              suspicious activities.
+  LogonId                                     Logon ID of the user related to an event. This feature helps identify activities accessing suspicious resources.                                               ✓                         ✓
+  ParentProcessId                             ID of the parent process. This feature provides information about relationships between running processes.                                                     ✓                         ✓
+  TerminalSessionId                           Information about the terminal session related to an event. This feature helps identify suspicious activities                                                  ✓                         ✓
+                                              within the terminal environment.
+  RuleName                                    Description of a rule regarding an event. This feature helps understand policies related to the occurring event.                                               ✓                         ✓
+  TargetObject                                Identiﬁes a target object of the running event. This feature provides information about suspicious entities.                                                   ✓                         ✓
+  DestinationPort                             Port number of the target host. This feature helps in identifying suspicious network communications.                                                                                     ✓
+  DestinationPortName                         Name of the destination port. This feature can help identify the type of service involved in the communication.                                                                          ✓
+
+
+
+     Table 3 shows a sample of event data taken from Sysmon Events,                                                               tionships between parent and child processes. These features, along with
+sourced from Google LLC. This dataset includes a subset of rows and                                                               EventType and IntegrityLevel, are important for distinguishing between
+features to provide a representative snapshot of the data used in our                                                             malicious and benign events, as they provide insights into process in-
+analysis. Speciﬁcally, the table captures key attributes such as Company,                                                         tegrity and access levels. The inclusion of network-related features like
+Description, IntegrityLevel, LogonId, and ProcessGuid. This sample data                                                           DestinationPort and DestinationPortName allows for the classiﬁcation
+is intended to illustrate the structure and types of information present                                                          of suspicious communications in network traﬃc.
+in the full dataset derived from a Sysmon event.                                                                                       The distinction in the selected features for each learning model arises
+     After  applying  preprocessing  and  Principal  Component  Analysis                                                          from the feature selection process using PCA, which was guided by the
+(PCA) for dimensionality reduction, several key features were selected                                                            F1 score of each model. As a result, the features that are most beneﬁcial
+for both supervised and unsupervised learning models based on their                                                               for unsupervised learning diﬀer from those for supervised learning, since
+relevance to distinguishing between normal and suspicious activities,                                                             each model’s performance metrics inﬂuence which features are deemed
+as outlined in Table 4 . In unsupervised learning, features such as Tar-                                                          most relevant. This tailored approach ensures that the features retained
+getFilename, EventID, TargetProcessGuid, EventType, and TargetImage                                                               are those that best contribute to the detection accuracy for each speciﬁc
+were retained as they provide critical information for identifying anoma-                                                         learning method.
+lies. For instance, TargetFilename can indicate unusual ﬁle manipula-
+tions, while EventID helps in classifying speciﬁc event types. The Tar-
+getProcessGuid and ParentProcessGuid features capture relationships                                                               4.2.   Evaluation metrics
+between processes, which is crucial in detecting suspicious process be-
+havior. Additionally, features like PreviousCreationUtcTime and Desti-                                                                 For evaluation, the F1-score is used to assess the performance and
+nationHostname help trace the chronological order of events and the                                                               accuracy of the models, providing a balanced measure of precision and
+entities involved in network communications.                                                                                      recall. The F1 score is the harmonic mean of precision and recall. It is
+     In supervised learning, PCA selected features such as LogonId, Par-                                                          calculated using the following formula:
+entProcessId,  TargetObject,  Description,  and  RuleName,  which  con-
+tribute to classifying known malware patterns. LogonId and User help                                                              𝐹 1 = 2 ⋅      Precision ⋅  Recall
+in identifying user-based activities, while ParentProcessId captures rela-                                                                       Precision +  Recall                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        (1)
+
+
+                                                                                                                             7
+
+PAGE 8
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+Table 5                                                                                                                            Table 7
+Performance metrics for the supervised learning algorithms.                                                                        Performance metrics for supervised learning models with hyperparameter tun-
+  Algorithm                                          Recall                    Precision                   F1-Score                ing using random search.
+
+  Naïve Bayes Classiﬁer                              0.9553                    0.3062                      0.4637                     Algorithm                                          Recall                   Precision                    F1-Score
+  Decision Tree Classiﬁer                            0.9029                    0.8639                      0.8830                     Naïve Bayes Classiﬁer                              0.9562                   0.3063                       0.4640
+  Random Forest Classiﬁer                            0.8982                    0.8757                      0.8868                     Decision Tree Classiﬁer                            0.8805                   0.8231                       0.8606
+  SVM Classiﬁer                                      0.6552                    0.5376                      0.5906                     Random Forest Classiﬁer                            0.9163                   0.8464                       0.8799
+                                                                                                                                      SVM Classiﬁer                                      0.7017                   0.6363                       0.6674
+
+
+Table 6
+Performance metrics for supervised learning with best Features.
+  Algorithm                               Number of features              Recall         Precision         F1-Score                recall of 0.8556, precision of 0.4312, and an F1-Score of 0.5734. This
+                                                                                                                                   indicates that while the model was eﬀective in identifying true posi-
+  Naïve Bayes Classiﬁer                   5                               0.8556         0.4312            0.5734                  tives, its precision was relatively low, suggesting a higher rate of false
+  Decision Tree Classiﬁer                 20                              0.9027         0.8645            0.8832                  positives. For the Decision Tree Classiﬁer, 20 features were selected,
+  Random Forest Classiﬁer                 20                              0.8982         0.8757            0.8868                  including ParentProcessId, TargetObject, TargetFilename, Description,
+                                                                                                                                   TargetProcessGuid, ParentProcessGuid, Product, PreviousCreationUtc-
+where precision and recall are deﬁned as:                                                                                          Time, RuleName, Company, User, TargetImage, EventID, IntegrityLevel,
+                                                                                                                                   EventType, TerminalSessionId, StartFunction, DestinationPort, Destina-
+Precision =                                            𝑇 𝑃                                                                         tionPortName, and LogonId. This model performed well across all met-
+                     𝑇 𝑃 + 𝐹 𝑃                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            (2) rics, with a recall of 0.9027, precision of 0.8645, and an F1-Score of
+                        𝑃                                                                                                          0.8832, indicating a balanced and robust performance. Similarly, the
+Recall =                                               𝑇 𝑇 𝑃 + 𝐹 𝑁                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    (3) Random Forest Classiﬁer also used 20 features, identical to those used
+                                                                                                                                   by the Decision Tree. The model demonstrated strong performance with
+Here, 𝑇 𝑃 (True Positives) is the number of correctly predicted positive                                                           a recall of 0.8982, precision of 0.8757, and an F1-Score of 0.8868,
+samples, 𝐹 𝑃 (False Positives) is the number of incorrectly predicted pos-                                                         slightly outperforming the Decision Tree in precision and F1-Score, sug-
+itive samples, and 𝐹 𝑁                   (False Negatives) is the number of incorrectly                                            gesting its superior capability in distinguishing between true and false
+predicted negative samples.                                                                                                        positives.
+                                                                                                                                         The next experiment conducted involves hyperparameter tuning us-
+4.3.   Supervised learning results                                                                                                 ing random search on the supervised learning models. This process aims
+                                                                                                                                   to optimize the performance of each model by ﬁnding the best set of pa-
+     The ﬁrst experiment was conducted using feature selection with Prin-                                                          rameters. The classiﬁers used include Naïve Bayes, Decision Tree, Ran-
+cipal Component Analysis (PCA) and without any hyperparameter tun-                                                                 dom Forest, and Support Vector Machine (SVM). The results of the ex-
+ing. This approach aimed to identify the most valuable features within                                                             periment are presented in Table 7 , detailing the recall, precision, and
+the dataset, utilizing PCA to reduce dimensionality while retaining the                                                            F1-score for each classiﬁer.
+most informative aspects of the data. The goal was to assess the base-                                                                   Naïve Bayes Classiﬁer achieves a recall of 0.9562, a precision of
+line performance of various classiﬁers, speciﬁcally Naïve Bayes, Deci-                                                             0.3063, and an F1-score of 0.4640. These metrics are nearly identical to
+sion Tree, Random Forest, and Support Vector Machine (SVM), with the                                                               the ﬁrst experiment (recall 0.9553, precision 0.3062, F1-score 0.4637),
+selected features from PCA, without optimizing their parameters.                                                                   indicating that hyperparameter tuning had minimal eﬀect on its per-
+     Table 5 presents a detailed comparison of various classiﬁers based                                                            formance. Despite its high recall, suggesting a strong ability to identify
+on their recall, precision, and F1-score. Naïve Bayes shows a recall                                                               true positives, the low precision indicates a high number of false posi-
+of 0.9553, indicating it successfully identiﬁes most malware instances.                                                            tives, leading to a moderate F1-score. The Decision Tree Classiﬁer shows
+However, its precision of 0.3062 and F1-score of 0.4637 suggest a high                                                             a recall of 0.8805, a precision of 0.8231, and an F1-score of 0.8606.
+number of false positives, making it less reliable overall. Decision Tree,                                                         These metrics are similar to the ﬁrst experiment (recall 0.9029, preci-
+on the other hand, has a recall of 0.9029, precision of 0.8639, and an                                                             sion 0.8639, F1-score 0.8830), with only slight improvements in pre-
+F1-score of 0.8830, indicating a good balance between identifying mal-                                                             cision and F1-score. This classiﬁer maintains a balance between recall
+ware and minimizing false positives. Random Forest performs similarly                                                              and precision, leading to a high F1-score, suggesting reliable perfor-
+to Decision Tree, with a slightly higher recall of 0.8982, precision of                                                            mance in identifying malware with fewer false positives compared to
+0.8757, and an F1-score of 0.8868, making it a strong contender for                                                                Naïve Bayes. Random Forest Classiﬁer has a recall of 0.9163, a preci-
+malware detection. The SVM classiﬁer, while achieving a perfect recall                                                             sion of 0.8464, and an F1-score of 0.8799. These metrics are almost the
+of 0.6552, has a lower precision of 0.5376 and an F1-score of 0.5906,                                                              same as the ﬁrst experiment (recall 0.8982, precision 0.8757, F1-score
+indicating a higher number of false positives compared to the tree-based                                                           0.8868), indicating that hyperparameter tuning had a negligible eﬀect.
+methods.                                                                                                                           This classiﬁer shows the best overall balance and robustness, with high
+     The purpose of the next experiment is to evaluate the eﬀectiveness                                                            precision and recall leading to a high F1-score. SVM Classiﬁer achieves a
+of feature selection and the subsequent impact on the performance of                                                               recall of 0.7017, a precision of 0.6363, and an F1-score of 0.6674. These
+various supervised learning algorithms. By determining the optimal set                                                             metrics are slightly better than the ﬁrst experiment (recall 0.6552, preci-
+of features for each model, this experiment aims to enhance the precision                                                          sion 0.5376, F1-score 0.5906), indicating a notable improvement due to
+and accuracy of the predictions made by these algorithms, particularly                                                             hyperparameter tuning. While it still has the lowest F1-score among the
+in the context of identifying malware.                                                                                             classiﬁers, its recall is signiﬁcant, indicating it can identify a substan-
+     Table 6 presents the performance metrics for three supervised learn-                                                          tial number of true positives but also has a higher rate of false positives
+ing algorithms: Naïve Bayes, Decision Tree, and Random Forest Clas-                                                                compared to the Decision Tree and Random Forest classiﬁers.
+siﬁer. The feature selection process identiﬁed the optimal number of                                                                     The  results  of  the  hyperparameter  tuning  using  random  search
+features for each algorithm, which were then used to evaluate their per-                                                           for  the  supervised  learning  models  yielded  the  optimal  parameters
+formance in terms of recall, precision, and F1-Score. The Naïve Bayes                                                              for  each  algorithm.  For  the  Naïve  Bayes  Classiﬁer,  the  best  hyper-
+Classiﬁer, which utilized 5 features such as ParentProcessId, TargetO-                                                             parameter identiﬁed was var_smoothing    =          1e-08 , which helps
+bject, TargetFilename, Description, and TargetProcessGuid achieved a                                                               to control the variance in the data and prevent the model from be-
+
+
+                                                                                                                              8
+
+PAGE 9
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+Table 8                                                                                                  Table 9
+Performance metrics for unsupervised learning with PCA.                                                  Performance metrics for unsupervised learning with best features.
+
+  Algorithm                            Recall                Precision                F1-Score                                                       Number of
+  Isolation Forest                     0.9322                0.6443                   0.7620               Algorithm                                 features          Recall     Precision    F1-Score
+
+  Local Outlier Factor                 0.9930                0.9575                   0.9750               Isolation Forest                          20                0.9323     0.6444       0.7620
+  One-Class SVM                        1.0000                0.6737                   0.8051               Local Outlier Factor                      1                 0.9997     0.9569       0.9778
+                                                                                                           One-Class Support Vector Machine          14                1.0000     0.7411       0.8513
+
+
+coming  too  sensitive  to  minor  variations.  In  the  case  of  the  Deci-                            Component Analysis (PCA). This experiment focused on identifying the
+sion Tree Classiﬁer, the optimal hyperparameters were found to be                                        most valuable features for each algorithm to achieve the best results,
+criterion    =          entropy ,  which  measures  the  quality  of  a  split                           unlike the previous experiment where a uniform set of features was ap-
+based on information gain, max_depth    =          17 to limit the depth of                              plied to all algorithms based on overall best results. For Isolation Forest,
+the tree, min_samples_split    =          14 and min_samples_leaf                                        20 features were selected, including TargetFilename, EventID, Target-
+=          5 to ensure that nodes have a suﬃcient number of samples, and                                 ProcessGuid, EventType, TargetImage, PreviousCreationUtcTime, Des-
+max_features    =          log2 to determine the number of features to                                   tinationHostname, Company, Description, Product, IntegrityLevel, Cre-
+consider when looking for the best split. For the Random Forest Clas-                                    ationUtcTime, StartFunction, ParentProcessGuid, User, LogonId, Parent-
+siﬁer, the random search identiﬁed criterion    =          gini for mea-                                 ProcessId, TerminalSessionId, RuleName, and TargetObject. This fea-
+suring the quality of splits, n_estimators    =          70 for the number                               ture set resulted in a recall of 0.9323, precision of 0.6444, and an F1-
+of trees in the forest, and no restriction on   max_depth . Addition-                                    Score of 0.7620. Local Outlier Factor achieved remarkable performance
+ally, min_samples_split    =          2 and min_samples_leaf    =          9                             with just 1 feature, TargetFilename, showing a recall of 0.9997, pre-
+were found to prevent overﬁtting, with max_features    =          sqrt to                                cision of 0.9569, and an F1-Score of 0.9778. One-Class Support Vec-
+consider a subset of features at each split, and bootstrap    =          False                           tor Machine utilized 14 features: TargetFilename, EventID, TargetPro-
+indicating that samples are not replaced during the creation of each tree.                               cessGuid, EventType, TargetImage, PreviousCreationUtcTime, Destina-
+Finally, for the SVM Classiﬁer, the best hyperparameters included a reg-                                 tionHostname, Company, Description, Product, IntegrityLevel, LogonId,
+ularization parameter C    =          10 , gamma    =          scale to control the in-                  CreationUtcTime, and LogonGuid. This conﬁguration attained a perfect
+ﬂuence of individual training examples, kernel    =          rbf for the type                            recall of 1.0000, precision of 0.7411, and an F1-Score of 0.8513.
+of decision boundary, and degree    =          4 specifying the degree of the                                 These results indicate that the PCA-based feature selection process
+polynomial kernel function (though it’s most relevant for poly kernels,                                  allowed for the optimal conﬁguration of features for each algorithm,
+here it shows the ﬂexibility of the search process). These hyperparame-                                  leading to improved performance. Local Outlier Factor, with its minimal
+ters collectively contribute to optimizing the performance of each algo-                                 feature set, performed exceptionally well, demonstrating the eﬃciency
+rithm in classifying the dataset accurately.                                                             of targeted feature selection. In contrast, the Isolation Forest and One-
+    Overall, the impact of hyperparameter tuning varies across diﬀer-                                    Class SVM algorithms showed diﬀerent strengths, emphasizing the value
+ent classiﬁers. While some classiﬁers show slight improvements, others,                                  of tailored feature sets in achieving the best performance for each model.
+like Naïve Bayes and Random Forest, exhibit minimal changes in per-                                           To optimize the performance of the unsupervised learning models,
+formance metrics.                                                                                        this experiment involved hyperparameter tuning using random search.
+
+                                                                                                         Hyperparameter tuning is a crucial step to ﬁnd the best parameters
+4.4.   Unsupervised learning results                                                                     for each model, ensuring that the algorithms operate at their high-
+                                                                                                         est potential. The results of the hyperparameter tuning using random
+    In the ﬁrst experiment conducted for dynamic malware analysis us-                                    search for the unsupervised learning models yielded the optimal pa-
+ing unsupervised learning, feature selection was implemented using                                       rameters for each algorithm. For the Isolation Forest, the best hyperpa-
+Principal Component Analysis (PCA). PCA, a widely used technique                                         rameters identiﬁed were n_estimators    =          125 , max_samples
+in machine learning and data analysis, was employed to identify the                                      =          670 ,    contamination    =          0.3 ,    max_features    =          21 ,  and
+most valuable features within the dataset. By transforming the high-                                     bootstrap    =          True , which help in determining the number of base
+dimensional data into a lower-dimensional space while retaining as                                       estimators, the fraction of samples used, the expected proportion of
+much variance as possible, PCA eﬀectively reduces the dimensionality                                     outliers, the number of features used, and whether to use bootstrap
+of the feature space. This process helps in extracting and highlighting                                  samples, respectively. For the Local Outlier Factor, the optimal hyper-
+the most informative aspects of the data, thereby enhancing the eﬃ-                                      parameters were n_neighbors    =          5 , algorithm    =          kd_tree ,
+ciency and eﬀectiveness of the unsupervised learning models used in                                      leaf_size    =          30 , and contamination    =          0.4 . These parame-
+the subsequent analysis.                                                                                 ters control the number of neighbors used for local density estimation,
+    The results of unsupervised learning with feature selection using PCA                                the algorithm used to compute the nearest neighbors, the leaf size of
+indicate that all three algorithms achieved high recall scores, suggesting                               the tree, and the proportion of outliers in the dataset. Finally, for the
+their eﬀectiveness in identifying outliers. Table 8 summarizes the perfor-                               One-Class SVM, the best hyperparameters included kernel    =          rbf ,
+mance metrics for Isolation Forest, Local Outlier Factor, and One-Class                                  nu    =          0.1 , shrinking    =          False , and gamma    =          auto . These
+SVM. Local Outlier Factor performed best overall, achieving a precision                                  hyperparameters specify the type of kernel function used to map input
+of 0.9575 and an F1-score of 0.9750, which were the highest among                                        space into higher-dimensional space, the upper bound on the fraction of
+the three algorithms. Isolation Forest also demonstrated good perfor-                                    margin errors, whether to use shrinking heuristics, and the kernel coef-
+mance with a recall of 0.9322, though its precision (0.6443) and F1-                                     ﬁcient, respectively. These carefully selected parameters contribute to
+score (0.7620) were slightly lower compared to Local Outlier Factor.                                     optimizing the performance of each algorithm in detecting anomalies
+One-Class SVM achieved perfect recall (1.0) but had a lower precision                                    within the dataset.
+of 0.6737 and an F1-score of 0.8051. These ﬁndings suggest that Lo-                                           Table 10 presents the performance metrics for unsupervised learning
+cal Outlier Factor could be the preferred choice in this scenario for its                                algorithms after hyperparameter tuning using random search. The algo-
+balanced performance across all metrics, especially considering its high                                 rithms evaluated include Isolation Forest, Local Outlier Factor, and One-
+precision and F1-score.                                                                                  Class Support Vector Machine. The hyperparameter tuning process in-
+    Table 9 presents the performance metrics for three unsupervised                                      volved using random search to ﬁnd the optimal settings for each model,
+learning algorithms evaluated after feature selection using Principal                                    thereby improving their performance. The results indicate that all three
+
+
+                                                                                                     9
+
+PAGE 10
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+Table 10
+Performance metrics for unsupervised learning models with hyperparameter
+tuning using random search.
+
+  Algorithm                              Recall                 Precision                  F1-Score
+
+  Isolation Forest                       0.9323                 0.6444                     0.7620
+  Local Outlier Factor                   0.9998                 0.9750                     0.9873
+  One-Class SVM                          1.0000                 0.8959                     0.9451
+
+
+
+algorithms achieved high recall scores, suggesting their eﬀectiveness in
+identifying outliers. Local Outlier Factor performed best overall, achiev-
+ing a recall of 0.9998, a precision of 0.9750, and an F1-score of 0.9873.
+Isolation Forest also demonstrated good performance, particularly in re-
+call with a score of 0.9323 and an F1-score of 0.7620. One-Class SVM,
+while achieving perfect recall of 1.0000, showed slightly lower precision                                      Fig.    5. Performance  comparison  of  supervised  and  unsupervised  learning
+(0.8959), resulting in an F1-score of 0.9451. These ﬁndings suggest that                                       models.
+Local Outlier Factor could be the preferred choice in this scenario for
+its balanced performance across all metrics. However, Isolation Forest
+and One-Class SVM also show considerable promise, with Isolation For-                                          and a solid F1-Score of 0.8051, making it a reliable model for detect-
+est being particularly useful when high recall is essential, and One-Class                                     ing all instances of malware, though its precision was slightly lower.
+SVM providing a high recall but slightly less precision.                                                       The Isolation Forest, while eﬀective, showed slightly lower performance
+                                                                                                               compared to LOF and One-Class SVM, with an F1-Score of 0.7620, sug-
+4.5.   Discussion                                                                                              gesting that it might have a more balanced detection but with some
+                                                                                                               trade-oﬀs in precision.
+    The results of the ﬁrst experiment in dynamic malware analysis,                                                 Overall, the experiment highlights the importance of model selec-
+which utilized both supervised and unsupervised learning models with                                           tion in dynamic malware analysis. The results indicate that ensemble
+feature selection conducted using Principal Component Analysis (PCA),                                          methods like Random Forest and anomaly detection models like LOF
+provide insightful comparisons in terms of model performance.                                                  provide the most reliable performance. The use of PCA for feature se-
+    In the supervised learning models, the Decision Tree Classiﬁer and                                         lection contributed to the eﬃciency of these models by reducing the
+Random Forest Classiﬁer outperformed the other models, achieving high                                          feature space while retaining essential information, thereby improving
+F1-Scores of 0.8830 and 0.8868, respectively. These models demon-                                              the models’ ability to accurately detect malware. Fig. 5 presents a chart
+strated a strong balance between recall and precision, indicating their                                        that compares the performance of the various models.
+robustness in detecting malware while minimizing false positives. How-                                              The hyperparameter tuning experiment aimed to optimize the per-
+ever, the Naïve Bayes Classiﬁer, despite having a high recall of 0.9553,                                       formance of the machine learning models used for dynamic malware
+struggled signiﬁcantly with precision, leading to a lower F1-Score of                                          analysis. By employing random search, key parameters for each model
+0.4637. This suggests that while the Naïve Bayes model was eﬀective in                                         were adjusted to ﬁnd the optimal balance between recall, precision, and
+identifying the majority of malware instances, it also produced a sub-                                         F1-Score. The results of this experiment reﬂect the impact of tuning
+stantial number of false alarms. The SVM Classiﬁer showed the weakest                                          on both supervised and unsupervised learning models, providing valu-
+performance among the supervised models, with an F1-Score of 0.5906,                                           able insights into the eﬀectiveness of each approach after optimization.
+reﬂecting its limitations in eﬀectively detecting malware within this ex-                                      Fig. 6 presents a chart that compares the performance of the models
+perimental context.                                                                                            with hyperparameter tuning.
+    For  the  unsupervised  learning  models,  the  Local  Outlier  Factor                                          For the Random Forest Classiﬁer, there was a slight decrease in F1-
+(LOF) achieved the highest performance, with an impressive F1-Score                                            Score from 0.8868 to 0.8799 after tuning, despite an increase in recall
+of 0.9750, demonstrating excellent precision and recall. This highlights                                       from 0.8982 to 0.9163. This suggests that the tuning process focused
+its strong capability in identifying anomalies associated with malware.                                        more on increasing the model’s ability to correctly identify malware,
+The One-Class SVM also performed well, with a perfect recall of 1.0000                                         which improved recall. However, this likely came at the expense of pre-
+
+
+
+                                                                                                                                Fig. 6. Performance comparison of supervised and unsupervised
+                                                                                                                                learning models with hyperparameter tuning.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                         10
+
+PAGE 11
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+cision, as the model began to classify more normal events as malware,                                   ysis (PCA) was employed to reduce dimensionality while preserving es-
+leading to more false positives. The tuning may have adjusted hyperpa-                                  sential information from these logs, enhancing model eﬃciency and per-
+rameters such as the number of trees or maximum depth, which favored                                    formance.
+identifying more malware instances but reduced the precision slightly,                                       The experimental results demonstrated that, with the data sourced
+causing a decrease in the overall F1-Score.                                                             from Sysmon events, supervised models like Random Forest and Deci-
+    Similarly, the Decision Tree Classiﬁer experienced a drop in F1-Score                               sion Tree were able to detect malware eﬀectively, though they faced
+from 0.8830 to 0.8606 after tuning. This decline could be attributed to                                 some trade-oﬀs between recall and precision after hyperparameter tun-
+changes in hyperparameters such as the maximum depth or the criteria                                    ing. Random Forest achieved the best overall performance among the
+for splitting nodes, which might have caused the model to overﬁt or be-                                 supervised models, with an F1-score of 0.8799, while the SVM classiﬁer
+come more sensitive to noise in the data. Although the model’s recall re-                               showed signiﬁcant improvements post-tuning. On the other hand, the
+mained relatively high, the trade-oﬀ  in precision likely arose because the                             Naïve Bayes Classiﬁer maintained high recall but struggled with preci-
+model was now misclassifying more benign events as malicious, thereby                                   sion due to the nature of the data, which may have caused an increase
+increasing false positives and leading to the drop in F1-Score.                                         in false positives.
+    In contrast, the Naïve Bayes Classiﬁer showed a slight improvement                                       For the unsupervised learning models, the use of event logs and Sys-
+in F1-Score, moving from 0.4637 to 0.4640. Although this increase is                                    mon data allowed for eﬀective anomaly detection. The Local Outlier
+marginal, it suggests that hyperparameter tuning helped ﬁne-tune the                                    Factor (LOF) and One-Class Support Vector Machine (SVM) performed
+model’s internal calculations, such as adjusting the smoothing parame-                                  exceptionally well, with LOF achieving near-perfect recall and preci-
+ter or better handling prior probabilities. This change helped the model                                sion, and an F1-score of 0.9873, making it the most reliable model for
+maintain its high recall while making a slight improvement in precision,                                identifying malware from system anomalies. The One-Class SVM also
+though it continued to struggle with accurately classifying all types of                                demonstrated strong performance, particularly after tuning, showing
+events, particularly in terms of reducing false positives.                                              the potential of unsupervised methods in leveraging log data for de-
+    The SVM Classiﬁer exhibited a more notable improvement in perfor-                                   tecting subtle malware behaviors.
+mance after tuning, with recall increasing from 0.6552 to 0.7017 and                                         Overall, this study underscores the importance of utilizing detailed
+F1-Score rising from 0.5906 to 0.6674. The tuning process likely opti-                                  system logs like Sysmon events for dynamic malware analysis. These
+mized key hyperparameters such as the kernel, regularization parame-                                    logs provide valuable insights into system behavior, enabling machine
+ter, or margin, allowing the model to better separate normal and mali-                                  learning models to diﬀerentiate between normal and malicious activities
+cious data points. This led to an increase in its ability to detect malware                             with a high degree of accuracy. However, a limitation of this approach
+while also maintaining a balance in precision, reducing the number of                                   is that the events collected from Windows are not inherently correlated
+false positives and resulting in a higher F1-Score.                                                     between parent and child processes, which could result in incomplete
+    For the unsupervised learning models, the Local Outlier Factor (LOF)                                contextual understanding of process relationships during malware anal-
+saw a substantial improvement in performance after hyperparameter                                       ysis. Addressing this limitation may require additional preprocessing
+tuning. Its F1-Score increased from 0.9750 to 0.9873, with recall near-                                 or supplementary data to establish these correlations. Future research
+ing perfection at 0.9998. The tuning likely optimized parameters re-                                    could also explore additional log sources or alternative feature selection
+lated to the number of neighbors or contamination factor, allowing the                                  methods to further enhance detection capabilities.
+model to better detect outliers representing malware while maintain-
+ing high precision and recall. This ﬁne-tuning resulted in fewer false                                  Declaration of competing interest
+positives and false negatives, making LOF highly eﬀective for malware
+detection.                                                                                                   The authors declare that they have no known competing ﬁnancial
+    Similarly, the One-Class Support Vector Machine (SVM) beneﬁted                                      interests or personal relationships that could have appeared to inﬂuence
+signiﬁcantly from hyperparameter tuning. Its F1-Score improved from                                     the work reported in this paper.
+0.8051 to 0.9451, with precision rising from 0.6737 to 0.8959 while
+maintaining a perfect recall of 1.0000. The improvement in precision                                    CRediT authorship contribution statement
+suggests that tuning helped the model better deﬁne its decision bound-
+aries for distinguishing between normal and malicious events. By op-                                         Riki Mi’roj Achmad: Software, Data curation, Writing –     original
+timizing parameters like the kernel type or regularization, the model                                   draft,  Methodology.             Dyah Putri   Nariswari:  Software,  Investigation,
+became more precise in identifying malware without falsely labeling                                     Data curation, Methodology, Formal analysis.         Baskoro Adi Pratomo:
+normal events as malicious.                                                                             Writing  –review   &   editing,   Supervision,   Investigation,   Validation,
+    Finally, the Isolation Forest maintained consistent performance, with                               Project administration, Data curation, Conceptualization.         Hudan Stu-
+its F1-Score remaining at 0.7620 before and after tuning. This suggests                                 diawan: Writing –review & editing, Supervision, Validation, Concep-
+that while tuning might have adjusted some internal parameters, the                                     tualization.
+model’s behavior remained stable, continuing to strike a balance be-
+tween recall and precision in detecting malware, albeit with some trade-                                Acknowledgment
+oﬀs compared to more sophisticated models like LOF.
+    Overall, hyperparameter tuning played a crucial role in optimizing                                       This research is supported by Institut Teknologi Sepuluh Nopem-
+the performance of these models, with some experiencing signiﬁcant                                      ber through the Departmental Research Grant under contract number
+improvements in precision and recall, while others faced trade-oﬀs, par-                                1052/PKS/ITS/2024.
+ticularly in balancing the detection of true positives and avoiding false
+positives. These results illustrate the importance of ﬁne-tuning in en-                                 References
+hancing the accuracy and eﬃciency of machine learning models for dy-
+namic malware analysis.                                                                                  [1] P. Maniriho, A.N. Mahmood, M.J.M. Chowdhury, A systematic literature review on
+                                                                                                              windows malware detection: techniques, research issues, and future directions, J.
+5.   Conclusions                                                                                              Syst. Softw. 209 (2024) 111921, doi: 10.1016/j.jss.2023.111921 .
+                                                                                                         [2] Crowdstrike,  2021  trends  report:  cybercriminals  exploit  pandemic,  target  re-
+                                                                                                              mote workers and ransomware hits healthcare the hardest, 2021, ( https://www.
+    In conclusion, this study leveraged data from Sysmon events to con-                                       crowdstrike.com/resources/reports/global- threat- report- 2021/ ).
+duct dynamic malware analysis using both supervised and unsupervised                                     [3] R.T.  Force,  Ransomware  task  force  (RTF)  report:  combating  ransomware:  a
+                                                                                                              comprehensive framework for action, 2021, ( https://securityandtechnology.org/
+learning models. Feature selection through Principal Component Anal-                                          ransomwaretaskforce/report/ ).
+
+
+                                                                                                   11
+
+PAGE 12
+R.M.      Achmad,      D.P.      Nariswari,      B.A.      Pratomo      et      al.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Cyber      Security      and      Applications      3      (2025)      100110
+
+
+ [4] AV-TEST, Av-test security report 2023: malware trends and detection statistics,                                                     [17] V. Karunakaran, A. Geetha, Performing dynamic malware analysis in software de-
+        2023, ( https://www.av-test.org/en/statistics/malware/ ).                                                                                ﬁned network using LSTM technique, Int. J. Intell. Syst. Appl. Eng. 12 (2s) (2023)
+ [5] M. Russinovich, T. Garnier, Sysmon - windows sysinternals, https://learn.microsoft.                                                         411–419 . https://ijisae.org/index.php/IJISAE/article/view/3641 .
+        com/en-us/sysinternals/downloads/sysmon .                                                                                        [18] D. Rabadi, S.G. Teo, Advanced windows methods on malware detection and classiﬁ-
+ [6] B.A. Pratomo, S.A. Kosim, H. Studiawan, A.O. Prabowo, Barongtrace: a malware                                                                cation, in: Proceedings of the 36th Annual Computer Security Applications Confer-
+        event log dataset for linux, in: L. Barolli (Ed.), Advanced Information Networking                                                       ence, ACSAC ’20, Association for Computing Machinery, New York, NY, USA, 2020,
+        and Applications, Springer Nature Switzerland, Cham, 2024, pp. 48–60 .                                                                   pp. 54–68, doi: 10.1145/3427228.3427242 .
+ [7] R. Vinayakumar, M. Alazab, K.P. Soman, P. Poornachandran, S. Venkatraman, Ro-                                                       [19] A. Irshad, M.K. Dutta, Identiﬁcation of Windows-Based Malware by Dynamic Analy-
+        bust intelligent malware detection using deep learning, IEEE Access 7 (2019) 46717–                                                      sis Using Machine Learning Algorithm, pp. 207–218. 10.1007/978- 981- 15- 1275- 9_
+        46738, doi: 10.1109/ACCESS.2019.2906934 .                                                                                                18 .
+ [8] O. Or-Meir, N. Nissim, Y. Elovici, L. Rokach, Dynamic malware analysis in the mod-                                                  [20] E. Amer, I. Zelinka, A dynamic windows malware detection and prediction method
+        ern era —A    state of the art survey, ACM Comput. Surv. 52 (5) (2019), doi: 10.1145/                                                    based on contextual understanding of API call sequence, Comput. Secur. (2020),
+        3329786 .                                                                                                                                doi: 10.1016/j.cose.2020.101760 .
+ [9] B.A. Pratomo, T. Jackson, P. Burnap, A. Hood, E. Anthi, Enhancing enterprise net-                                                   [21] J.A. Herrera-Silva, M. Hernández-Álvarez, Dynamic feature dataset for ransomware
+        work security: Comparing machine-level and process-level analysis for dynamic mal-                                                       detection using machine learning algorithms, Sensors 23 (3) (2023) 1053 .
+        ware detection, 2023, arXiv: 2310.18165 .                                                                                        [22] N. Usman, S. Usman, F. Khan, M. Ahmad Jan, A. Sajid, M. Alazab, P. Watters,
+[10] G. Webb, Naïve Bayes, pp. 1–2. 10.1007/978- 1- 4899- 7502- 7- 581- 1 .                                                                      Intelligent dynamic malware detection using machine learning in IP reputation
+[11] L.    Rokach,    O.    Maimon,    Decision    Trees,    vol.    6,    pp.    165–192.    10.1007/                                           for forensics data analytics, Future Gener. Comput. Syst. 118 (2021) 124–141,
+        0- 387- 25465- X- 9 .                                                                                                                    doi: 10.1016/j.future.2021.01.004 .
+[12] L.  Breiman,  Random  forests,  Mach.  Learn.  45  (2001)  5–32,  doi: 10.1023/A:                                                   [23] N. Kumar, S. Mukhopadhyay, M. Gupta, A. Handa, S. Shukla, Malware classiﬁca-
+        1010950718922 .                                                                                                                          tion using early stage behavioral analysis, 2019, pp. 16–23. 10.1109/AsiaJCIS.2019.
+[13] M. Hearst, S.T. Dumais, E. Osman, J. Platt, B. Scholkopf, Support vector machines,                                                          00-10 .
+        Intell. Syst. Appl., IEEE 13 (1998) 18–28, doi: 10.1109/5254.708428 .                                                            [24] M. Rhode, P. Burnap, K. Jones, Early stage malware prediction using recurrent neural
+[14] F.T. Liu, K. Ting, Z.-H. Zhou, Isolation forest, 2009, pp. 413–422. 10.1109/ICDM.                                                           networks, Comput. Secur. 77 (2018) 578–594 .
+        2008.17 .                                                                                                                        [25] Z. Zhang, P. Qi, W. Wang, Dynamic malware analysis with feature engineering and
+[15] M. Breunig, P. Kröger, R. Ng, J. Sander, Lof: Identifying density-based local outliers,                                                     feature learning, Proc. AAAI Conf. Artif. Intell. 34 (2020) 1210–1217, doi: 10.1609/
+        volume 29, 2000, pp. 93–104. 10.1145/342009.335388 .                                                                                     aaai.v34i01.5474 .
+[16] M. Amer, M. Goldstein, S. Abdennadher, Enhancing one-class support vector ma-                                                       [26] I. Jolliﬀe, Principal component analysis springer verlag (2002).
+        chines for unsupervised anomaly detection, 2013, pp. 8–15. 10.1145/2500853.                                                      [27] J. Bergstra, Y. Bengio, Random search for hyper-parameter optimization, J. Mach.
+        2500857 .                                                                                                                                Learn. Res. 13 (2012) 281–305 .
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                  12

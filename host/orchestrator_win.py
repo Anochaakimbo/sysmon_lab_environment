@@ -87,6 +87,33 @@ SCENARIOS = {
         "attack": "T1069.001,T1012,T1497.001,T1552.001,T1548.002,"
                   "T1134.001,T1134.002,T1055,T1218.011",
     },
+    # scenario ใหม่ (16 ก.ย. 2026) เพิ่มความหลากหลาย + คู่กับ Zeek fusion
+    # c2_dns_win : DNS C2/tunneling - ต้องเปิด host/dns_server.py (Administrator)
+    "c2_dns_win": {
+        "script": "c2_dns_win.ps1",
+        "label": "lineage",
+        "seed_dir": r"C:\lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1071.004,T1048.003,T1132.001,T1016,T1018,T1049,"
+                  "T1059.001,T1071.001,T1105",
+    },
+    # injection_win : อุดช่องว่าง CreateRemoteThread (EventID 8) ที่มีแค่ 4 แถว
+    "injection_win": {
+        "script": "injection_win.ps1",
+        "label": "lineage",
+        "seed_dir": r"C:\lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1057,T1055",
+    },
+    # initial_access_win : execution chain ลึก (proxy-exec -> script host -> payload)
+    "initial_access_win": {
+        "script": "initial_access_win.ps1",
+        "label": "lineage",
+        "seed_dir": r"C:\lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1204.002,T1218.011,T1218.005,T1059.001,T1059.003,"
+                  "T1105,T1547.001,T1036.003",
+    },
 }
 
 

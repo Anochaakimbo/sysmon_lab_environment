@@ -23,7 +23,7 @@ New-Item -ItemType Directory -Path $mine -Force | Out-Null
 
 # ---------- Stage 1: recon สเปกเครื่อง (miner ทุกตัวทำก่อนเริ่ม) ----------
 Write-Host "[miner] recon"
-Atomic "T1082" "1,7,9,11,27,35"             # System Information Discovery
+Atomic "T1082" "1,7,9,11,27,28,29,30,34,35,37,38,39,40"             # System Information Discovery
 Atomic "T1057" "2,3,4,5,6"             # Process Discovery
 
 Get-CimInstance Win32_Processor      | Select-Object Name,NumberOfCores,MaxClockSpeed |
@@ -40,7 +40,7 @@ tasklist /v | Out-File "$mine\tasklist.txt"
 
 # ---------- Stage 2: ingress tool transfer ----------
 Write-Host "[miner] tool transfer"
-Atomic "T1105" "7,9,10,15,16,25"             # Ingress Tool Transfer (ต้องมีเน็ต/NAT)
+Atomic "T1105" "7,8,9,10,11,12,15,16,17,22,24,25,29"             # Ingress Tool Transfer (ต้องมีเน็ต/NAT)
 
 # ---------- Stage 3: resource hijacking (ART) ----------
 Write-Host "[miner] resource hijacking via ART"
@@ -88,12 +88,12 @@ $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
 
 # ---------- Stage 6: persistence ----------
 Write-Host "[miner] persistence"
-Atomic "T1053.005" "2,4,7,9"     # Scheduled Task
+Atomic "T1053.005" "1,2,4,7,9"     # Scheduled Task
 
 # ---------- Cleanup ----------
 Write-Host "[miner] cleanup"
-Atomic-Cleanup "T1053.005" "2,4,7,9"
+Atomic-Cleanup "T1053.005" "1,2,4,7,9"
 Atomic-Cleanup "T1496" "2"
-Atomic-Cleanup "T1105" "7,9,10,15,16,25"      # T1105 โหลดไฟล์ทิ้งไว้ ต้องล้าง
+Atomic-Cleanup "T1105" "7,8,9,10,11,12,15,16,17,22,24,25,29"      # T1105 โหลดไฟล์ทิ้งไว้ ต้องล้าง
 
 Done-Banner "miner_win"

@@ -1,0 +1,25 @@
+{
+  "pages": 10,
+  "tables": 8,
+  "figures": 4,
+  "captions": 12,
+  "headings": [
+    "บทคัดย่อ",
+    "ABSTRACT",
+    "1. บทนำ",
+    "2. งานที่เกี่ยวข้อง",
+    "3. ระเบียบวิธีวิจัย",
+    "4. การทดลองและผลลัพธ์",
+    "5. อภิปรายผล",
+    "6. สรุปและงานในอนาคต",
+    "เอกสารอ้างอิง"
+  ],
+  "subheading_count": 18,
+  "source_files_unchanged": true,
+  "scientific_text_preserved": true,
+  "table_values_preserved": true,
+  "image_bytes_preserved": true,
+  "template_geometry_verified": true,
+  "fonts_and_alignment_verified": true,
+  "review_local_links_valid": true
+}

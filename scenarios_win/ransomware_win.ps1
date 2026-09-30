@@ -40,7 +40,7 @@ Write-Host "[ransom] victim files = $((Get-ChildItem $victim -File).Count)"
 
 # ---------- Stage 2: สำรวจไฟล์เป้าหมาย ----------
 Write-Host "[ransom] discovery"
-Atomic "T1083" "1,2,5,9"             # File and Directory Discovery
+Atomic "T1083" "1,2,5,6,7,9"             # File and Directory Discovery
 Atomic "T1005" "1"               # Data from Local System
 
 # ---------- Stage 3: staging ----------
@@ -81,7 +81,7 @@ $note | Out-File "$victim\READ_ME_RANSOM.txt" -Encoding utf8
 
 # ---------- Stage 7: ลบร่องรอย ----------
 Write-Host "[ransom] indicator removal"
-Atomic "T1070.004" "4,5,6,7,10"  # Indicator Removal - File Deletion
+Atomic "T1070.004" "4,5,6,7,9,10,11"  # Indicator Removal - File Deletion
 
 # ---------- ตัวเลือก: Inhibit System Recovery (T1490) ----------
 # ART มี Windows test สำหรับ T1490 (vssadmin delete shadows / bcdedit)

@@ -15,3 +15,8 @@ atomic_report_win.txt
 
 # โมเดลที่เทรนแล้ว - สร้างใหม่ได้ด้วย host/ml_train.py
 models/
+
+# network capture ดิบ + ผลของ Zeek - ใหญ่ และเป็น raw/derive
+# host/pcap/ = raw source of truth ตัวที่ 3 (backup ไว้ที่อื่นเหมือน logs/)
+host/pcap/
+host/zeek/

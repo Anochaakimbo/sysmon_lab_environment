@@ -42,6 +42,7 @@ for _s in (sys.stdout, sys.stderr):
 
 import orchestrator as orch
 import orchestrator_win as orch_win
+from pcap_capture import PcapCapture
 
 HOST_DIR = Path(__file__).resolve().parent
 LAB_DIR = HOST_DIR.parent
@@ -88,7 +89,11 @@ STATE = {
     "done": [],           # scenario ที่เก็บเสร็จรอบนี้
     "log": [],            # บรรทัด log สด (เก็บ 400 บรรทัดล่าสุด)
 }
-COLLECTORS = {"receiver": None, "pool": None, "c2": None}
+COLLECTORS = {"receiver": None, "pool": None, "c2": None, "pcap": None, "dns": None}
+
+# เก็บ pcap คู่ขนานเพื่อเอาไปเข้า Zeek (host/run_zeek.py -> host/fuse_network.py)
+# ปิดด้วย env PCAP=0 ถ้าไม่ได้ลง Wireshark/Npcap
+ENABLE_PCAP = os.environ.get("PCAP", "1") != "0"
 LOCK = threading.Lock()
 
 
@@ -124,12 +129,33 @@ def start_collectors(session, platform="linux"):
     COLLECTORS["pool"] = _spawn("mining_pool.py")      # :3333 stratum
     time.sleep(0.5)
     COLLECTORS["c2"] = _spawn("c2_server.py")          # :8080 + :4444
+    COLLECTORS["dns"] = _spawn("dns_server.py")        # :53 (c2_dns_win)
+    pcap_note = ""
+    if ENABLE_PCAP:
+        try:
+            COLLECTORS["pcap"] = PcapCapture(session).start()
+            pcap_note = " + pcap"
+        except (RuntimeError, OSError) as e:
+            # ไม่ throw: dataset ฝั่ง Sysmon ยังใช้ได้ แค่ไม่มีฝั่ง network
+            logline(f"[collectors] !! เปิด pcap ไม่ได้ - รอบนี้จะไม่มีข้อมูล Zeek")
+            logline(f"[collectors]    {e}")
+            logline(f"[collectors]    ตั้ง PCAP=0 ถ้าตั้งใจไม่เก็บ pcap")
     recv = f"log_receiver(session={session}) + " if platform == "linux" else ""
-    logline(f"[collectors] {recv}mining_pool + c2_server  [{platform}]")
+    logline(f"[collectors] {recv}mining_pool + c2_server + dns_server{pcap_note}  [{platform}]")
 
 
 def stop_collectors():
-    for k in ("receiver", "pool", "c2"):
+    cap = COLLECTORS.get("pcap")
+    if cap is not None:
+        try:
+            meta = cap.stop()
+            if meta:
+                logline(f"[collectors] pcap {meta['packets']} packets "
+                        f"-> {Path(meta['pcap']).name}")
+        except (RuntimeError, OSError) as e:
+            logline(f"[collectors] !! ปิด pcap ไม่สำเร็จ: {e}")
+        COLLECTORS["pcap"] = None
+    for k in ("receiver", "pool", "c2", "dns"):
         p = COLLECTORS.get(k)
         if p and p.poll() is None:
             p.terminate()

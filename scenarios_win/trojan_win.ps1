@@ -20,20 +20,20 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
 # ---------- Stage 1: reconnaissance ----------
 Write-Host "[trojan] recon"
-Atomic "T1082" "1,7,9,11,27,35"           # System Information Discovery
+Atomic "T1082" "1,7,9,11,27,28,29,30,34,35,37,38,39,40"           # System Information Discovery
 Atomic "T1033" "1,4,5,6"             # System Owner/User Discovery
 Atomic "T1057" "2,3,4,5,6"             # Process Discovery
 Atomic "T1087.001" "8,9,10"         # Account Discovery - Local Account
 
 # ---------- Stage 2: execution ----------
 Write-Host "[trojan] execution"
-Atomic "T1059.001" "5,7,8"       # PowerShell execution (เลี่ยง 1=Mimikatz, 2/3=BloodHound)
+Atomic "T1059.001" "5,6,7,8,10,17,18,20"       # PowerShell execution (เลี่ยง 1=Mimikatz, 2/3=BloodHound)
 
 # ---------- Stage 3: persistence (2 ช่องทาง) ----------
 Write-Host "[trojan] persistence"
-Atomic "T1547.001" "1,2,8,9,11"  # Registry Run Keys (เลี่ยง 14/15/17 ที่แก้ Winlogon/BootExecute)
-Atomic "T1053.005" "2,4,7,9"     # Scheduled Task
-Atomic "T1112" "1,6,7,40,41"     # Modify Registry (มี 90 test เลือกตัวที่ไม่ปิด cmd/regedit/Defender)
+Atomic "T1547.001" "1,2,3,4,5,6,7,8,9,11,12,13,16,18,20"  # Registry Run Keys (เลี่ยง 14/15/17 ที่แก้ Winlogon/BootExecute)
+Atomic "T1053.005" "1,2,4,7,9"     # Scheduled Task
+Atomic "T1112" "1,2,3,4,5,6,7,8,9,40,41,43,45,46,47,48,49,57,63,85,87,88,89,90"     # Modify Registry (มี 90 test เลือกตัวที่ไม่ปิด cmd/regedit/Defender)
 
 # ---------- Stage 4: collection + staging ----------
 Write-Host "[trojan] collection"
@@ -42,8 +42,8 @@ Atomic "T1074.001" "1,3"         # Local Data Staging
 
 # ---------- Stage 5: defense evasion ----------
 Write-Host "[trojan] evasion"
-Atomic "T1027" "2,3,7,11"        # Obfuscated Files or Information
-Atomic "T1036.003" "1,3,5,7"     # Masquerading - Rename System Utilities
+Atomic "T1027" "2,3,5,6,7,9,11"        # Obfuscated Files or Information
+Atomic "T1036.003" "1,3,5,7,8"     # Masquerading - Rename System Utilities
 
 # ---------- Stage 6: file activity ใน sandbox (FileCreate/Delete telemetry) ----------
 Write-Host "[trojan] sandbox file activity"
@@ -57,11 +57,11 @@ Remove-Item "$stage\*.dat" -Force
 # ---------- Cleanup: ล้าง persistence ที่ ART ทิ้งไว้ ----------
 # จำเป็นมาก ไม่งั้น artifact ค้างข้ามรอบ ทำให้ session ถัดไปปนเปื้อน
 Write-Host "[trojan] cleanup"
-Atomic-Cleanup "T1547.001" "1,2,8,9,11"
-Atomic-Cleanup "T1053.005" "2,4,7,9"
-Atomic-Cleanup "T1112" "1,6,7,40,41"
-Atomic-Cleanup "T1036.003" "1,3,5,7"
+Atomic-Cleanup "T1547.001" "1,2,3,4,5,6,7,8,9,11,12,13,16,18,20"
+Atomic-Cleanup "T1053.005" "1,2,4,7,9"
+Atomic-Cleanup "T1112" "1,2,3,4,5,6,7,8,9,40,41,43,45,46,47,48,49,57,63,85,87,88,89,90"
+Atomic-Cleanup "T1036.003" "1,3,5,7,8"
 Atomic-Cleanup "T1074.001" "1,3"    # staging ทิ้งไฟล์ไว้
-Atomic-Cleanup "T1027" "2,3,7,11"   # obfuscated payload ทิ้งไฟล์ไว้
+Atomic-Cleanup "T1027" "2,3,5,6,7,9,11"   # obfuscated payload ทิ้งไฟล์ไว้
 
 Done-Banner "trojan_win"
