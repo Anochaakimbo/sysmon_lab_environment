@@ -53,9 +53,9 @@ import revised_experiments as rx
 AGES = [0, 1, 2, 5, 10, 30, 60, 300, np.inf]
 CHECK_S = 5
 RF_THR = 0.5
-RF_THRS = (0.5, 0.7, 0.9)        # host-window grid
-WINDOWS = (30, 60, 120, 300)
-MIN_PROCS = (1, 2, 3, 5)
+RF_THRS = (0.5, 0.7, 0.9, 0.95, 0.98, 0.99)   # host-window grid
+WINDOWS = (60, 300)
+MIN_PROCS = (1, 2, 3)
 
 
 def prefix_features(raw):

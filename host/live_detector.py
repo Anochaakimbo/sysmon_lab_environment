@@ -171,14 +171,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", action="store_true", help="train models/live_rf.joblib and exit")
     ap.add_argument("--train-platforms", default="linux,windows")
-    ap.add_argument("--merged", default=rx.MERGED, help="merged CSV inside host/dataset used by --train")
+    ap.add_argument("--merged", default="merged_dataset_v2.csv", help="merged CSV inside host/dataset used by --train")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--follow", help="log file to tail, or 'latest'")
     g.add_argument("--replay", help="log file to read once, as fast as possible")
     ap.add_argument("--platform", default="linux", choices=["linux", "windows"])
-    ap.add_argument("--thr", type=float, default=0.9, help="RF probability for a process to count as flagged")
-    ap.add_argument("--window", type=int, default=60, help="W seconds")
-    ap.add_argument("--min-procs", type=int, default=2, help="N flagged processes within W")
+    # replay on merged_dataset_v2 (8 Oct 2026): thr 0.98, W 300, N 1 -> 10/10 unseen attack
+    # scenarios detected, median time-to-detect 15 s, 3.7 false alarms/h on unseen benign runs.
+    # CAVEAT: at this threshold the flagged attack processes are mostly the Atomic Red Team
+    # framework itself (Linux: pwsh Import-Module Invoke-AtomicRedTeam = 100% of flags;
+    # Windows: Start-Job workers and '& {...}' wrappers), not the technique commands.
+    # reference/replay_v2/harness_probe.csv. Detection of real attack behaviour is not shown yet.
+    ap.add_argument("--thr", type=float, default=0.98, help="RF probability for a process to count as flagged")
+    ap.add_argument("--window", type=int, default=300, help="W seconds")
+    ap.add_argument("--min-procs", type=int, default=1, help="N flagged processes within W")
     ap.add_argument("--out", default=ALERTS)
     a = ap.parse_args()
     rx.MERGED = a.merged
