@@ -15,7 +15,14 @@ Changes relative to host/ml_train.py (reviewer items C001-C003, step 4, step 6):
        2 Linux runs collected on a later day (ransomware, trojan)
   * anomaly detectors are trained on benign training processes only, and the
     alarm threshold is the 95th percentile of scores on a held-out *benign-only*
-    validation subset (target FPR 5%); no malicious label is used anywhere
+    validation subset (target FPR 5%); no malicious label is used anywhere,
+    and the anomaly detectors get their own StandardScaler fitted on that same
+    benign fit subset (the supervised scaler sees the whole training fold)
+  * anomaly score = -score_samples(X) for every detector (higher = more anomalous)
+  * SVM trains on the full training fold like every other model (no subsample cap;
+    set env SVM_MAX=N to restore a cap)
+  * every metric row is reported pooled (Platform=all) and per platform;
+    per-platform rows go to *_by_platform.csv, the main CSVs keep pooled rows only
   * key-impact experiment: ProcessGuid-only vs composite key under the same
     single process split used in the original draft and under P1
 Outputs: results/*.csv and results/summary.json
@@ -44,7 +51,7 @@ NULL_GUID = "{00000000-0000-0000-0000-000000000000}"
 EXTRA_RUNS = ["ransomware_dash_213312_20260825_213312", "trojan_dash_211024_20260825_211024"]
 EVENT_IDS = [1, 2, 3, 4, 5, 8, 9, 11, 12, 13, 23]
 TARGET_FPR = 0.05
-SVM_MAX = 8000
+SVM_MAX = int(os.environ.get("SVM_MAX", "0"))  # 0 = no cap
 FAST = os.environ.get("FAST") == "1"
 
 
@@ -153,35 +160,48 @@ def scores(yte, pred, s=None):
     return r
 
 
-def evaluate(X, y, groups, tr, te, tag, models=("sup", "anom")):
-    """Fit on tr, test on te. Scaler and all thresholds come from training data only."""
+def evaluate(X, y, groups, tr, te, tag, models=("sup", "anom"), plat=None):
+    """Fit on tr, test on te. Scalers and all thresholds come from training data only.
+    plat: platform label per sample -> extra rows per platform of the test set."""
     sc = StandardScaler().fit(X[tr])
     A, B = sc.transform(X[tr]), sc.transform(X[te])
     ytr, yte = y[tr], y[te]
+    pte = plat[te] if plat is not None else None
     rows = []
+
+    def emit(typ, name, pred, s=None):
+        rows.append(dict(tag, Platform="all", Type=typ, Model=name, **scores(yte, pred, s)))
+        if pte is None:
+            return
+        for p in np.unique(pte):
+            k = pte == p
+            rows.append(dict(tag, Platform=p, n_test_platform=int(k.sum()), Type=typ, Model=name,
+                             **scores(yte[k], pred[k], None if s is None else s[k])))
     if "sup" in models:
         for name, m in supervised():
             if FAST and name == "SVM":
                 continue
             idx = np.arange(len(ytr))
-            if name == "SVM" and len(idx) > SVM_MAX:
+            if name == "SVM" and SVM_MAX and len(idx) > SVM_MAX:
                 idx = np.random.RandomState(SEED).choice(idx, SVM_MAX, replace=False)
             m.fit(A[idx], ytr[idx])
             s = m.predict_proba(B)[:, 1] if hasattr(m, "predict_proba") else m.decision_function(B)
-            rows.append(dict(tag, Type="Supervised", Model=name, **scores(yte, m.predict(B), s)))
+            emit("Supervised", name, m.predict(B), s)
     if "anom" in models:
         # benign-only training set, split by lineage into fit (80%) / threshold-calibration (20%)
         ben = np.where(ytr == 0)[0]
         gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
         fit_i, cal_i = next(gss.split(ben, groups=groups[tr][ben]))
-        for name, m in anomaly(A[ben[fit_i]]):
+        Xtr = X[tr]
+        asc = StandardScaler().fit(Xtr[ben[fit_i]])          # benign fit subset only
+        Afit, Acal, Bte = asc.transform(Xtr[ben[fit_i]]), asc.transform(Xtr[ben[cal_i]]), asc.transform(X[te])
+        for name, m in anomaly(Afit):
             if FAST and name == "One-Class SVM":
                 continue
-            thr = np.quantile(-m.score_samples(A[ben[cal_i]]), 1 - TARGET_FPR)
-            s = -m.score_samples(B)
-            rows.append(dict(tag, Type="Anomaly", Model=name, **scores(yte, (s > thr).astype(int), s)))
-    rows.append(dict(tag, Type="Baseline", Model="All-positive",
-                     **scores(yte, np.ones_like(yte))))
+            thr = np.quantile(-m.score_samples(Acal), 1 - TARGET_FPR)
+            s = -m.score_samples(Bte)
+            emit("Anomaly", name, (s > thr).astype(int), s)
+    emit("Baseline", "All-positive", np.ones_like(yte))
     return rows
 
 
@@ -203,7 +223,7 @@ def p1_lineage_cv(X, y, meta, repeats=5, k=5, models=("sup", "anom")):
                        test_mal=float(y[te].mean()),
                        test_benign_from_benign_runs=int(((y[te] == 0) & meta.session.str.startswith("benign").values[te]).sum()),
                        test_benign_from_attack_runs=int(((y[te] == 0) & ~meta.session.str.startswith("benign").values[te]).sum()))
-            rows += evaluate(X, y, groups, tr, te, tag, models)
+            rows += evaluate(X, y, groups, tr, te, tag, models, meta.platform.values)
         print("  P1 repeat %d done" % rep, flush=True)
     return pd.DataFrame(rows)
 
@@ -218,7 +238,7 @@ def p2_leave_one_run_out(X, y, meta):
         tr = np.where(meta.run.values != run)[0]
         tag = dict(Protocol="P2_leave_one_run_out", HeldOut=meta.platform.iloc[te[0]] + "|" + meta.scenario.iloc[te[0]],
                    n_test=len(te), n_test_mal=int(y[te].sum()), n_test_benign=int((y[te] == 0).sum()))
-        rows += evaluate(X, y, groups, tr, te, tag)
+        rows += evaluate(X, y, groups, tr, te, tag, plat=meta.platform.values)
         print("  P2", tag["HeldOut"], flush=True)
     return pd.DataFrame(rows)
 
@@ -231,7 +251,7 @@ def p3_leave_one_scenario_out(X, y, meta):
         tr = np.where(meta.scenario.values != sc)[0]
         tag = dict(Protocol="P3_leave_one_scenario_out", HeldOut=sc, n_test=len(te),
                    n_test_mal=int(y[te].sum()), n_test_benign=int((y[te] == 0).sum()))
-        rows += evaluate(X, y, groups, tr, te, tag)
+        rows += evaluate(X, y, groups, tr, te, tag, plat=meta.platform.values)
         print("  P3", sc, flush=True)
     return pd.DataFrame(rows)
 
@@ -245,7 +265,7 @@ def p4_independent_runs(raw, extra):
         tr, te = np.where(~new)[0], np.where(te_mask)[0]
         tag = dict(Protocol="P4_independent_run", HeldOut=name, n_test=len(te),
                    n_test_mal=int(y[te].sum()), n_test_benign=int((y[te] == 0).sum()))
-        rows += evaluate(X, y, m.lineage.values, tr, te, tag)
+        rows += evaluate(X, y, m.lineage.values, tr, te, tag, plat=m.platform.values)
     return pd.DataFrame(rows), m[new].groupby("run").label.agg(["size", "sum"])
 
 
@@ -288,10 +308,15 @@ def main():
     raw, extra = load()
     summary = {}
     def cached(name, fn):
+        """Main CSV = pooled rows; per-platform rows (if any) -> *_by_platform.csv."""
         p = os.path.join(OUT, name)
+        pp = p.replace(".csv", "_by_platform.csv")
         if os.path.exists(p):
             return pd.read_csv(p)
         df = fn()
+        if "Platform" in df.columns:
+            df[df.Platform != "all"].to_csv(pp, index=False)
+            df = df[df.Platform == "all"].drop(columns=["Platform", "n_test_platform"], errors="ignore")
         df.to_csv(p, index=False)
         return df
     print("key impact ...", flush=True)
@@ -340,6 +365,14 @@ def main():
 
     for name, df in [("p1", p1), ("p2", p2), ("p3", p3)]:
         summarize(df).to_csv(os.path.join(OUT, name + "_summary.csv"), index=False)
+    bp = {n: os.path.join(OUT, f) for n, f in [("p1", "p1_lineage_cv_by_platform.csv"),
+          ("p2", "p2_leave_one_run_out_by_platform.csv"), ("p3", "p3_leave_one_scenario_out_by_platform.csv"),
+          ("p4", "p4_independent_runs_by_platform.csv")]}
+    for name, path in bp.items():
+        if os.path.exists(path):
+            d = pd.read_csv(path)
+            by = ["Platform", "Type", "Model"] + (["HeldOut"] if name == "p4" else [])
+            summarize(d, by).to_csv(os.path.join(OUT, name + "_summary_by_platform.csv"), index=False)
     summary["runtime_s"] = round(time.time() - t0)
     json.dump(summary, open(os.path.join(OUT, "summary.json"), "w"), indent=2, default=str)
     print("done in %ds" % summary["runtime_s"])
