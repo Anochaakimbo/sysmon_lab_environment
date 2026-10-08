@@ -46,6 +46,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # usage: python host/revised_experiments.py [dataset_dir] [output_dir]
 DATA = os.path.join(_HERE, "dataset")
 OUT = os.path.join(os.path.dirname(_HERE), "reference", "revised_results")
+MERGED = "merged_dataset.csv"        # file name inside DATA; other scripts may point it elsewhere
 NULL_GUID = "{00000000-0000-0000-0000-000000000000}"
 EXTRA_RUNS = ["ransomware_dash_213312_20260825_213312", "trojan_dash_211024_20260825_211024"]
 EVENT_IDS = [1, 2, 3, 4, 5, 8, 9, 11, 12, 13, 23]
@@ -56,7 +57,7 @@ FAST = os.environ.get("FAST") == "1"
 
 # ----------------------------------------------------------------- data
 def load():
-    d = pd.read_csv(os.path.join(DATA, "merged_dataset.csv"), low_memory=False)
+    d = pd.read_csv(os.path.join(DATA, MERGED), low_memory=False)
     extra = []
     for r in EXTRA_RUNS:
         e = pd.read_csv(os.path.join(DATA, r + "_labeled.csv"), low_memory=False)

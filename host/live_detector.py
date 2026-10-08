@@ -171,6 +171,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", action="store_true", help="train models/live_rf.joblib and exit")
     ap.add_argument("--train-platforms", default="linux,windows")
+    ap.add_argument("--merged", default=rx.MERGED, help="merged CSV inside host/dataset used by --train")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--follow", help="log file to tail, or 'latest'")
     g.add_argument("--replay", help="log file to read once, as fast as possible")
@@ -180,6 +181,7 @@ def main():
     ap.add_argument("--min-procs", type=int, default=2, help="N flagged processes within W")
     ap.add_argument("--out", default=ALERTS)
     a = ap.parse_args()
+    rx.MERGED = a.merged
     if a.train:
         return train(a.train_platforms.split(","))
     if not os.path.exists(MODEL):

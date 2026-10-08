@@ -85,7 +85,36 @@ def folds(meta):
         yield "P3", sc, meta.scenario.values == sc
     for r in att_runs:
         yield "P2", meta.platform[meta.run == r].iloc[0] + "|" + meta.scenario[meta.run == r].iloc[0], meta.run.values == r
-    yield "BEN", "benign runs", meta.scenario.str.startswith("benign").values
+    for r in sorted(r for r in meta.run.unique() if meta.session[meta.run == r].iloc[0].startswith("benign")):
+        yield "BEN", meta.platform[meta.run == r].iloc[0] + "|" + meta.session[meta.run == r].iloc[0], meta.run.values == r
+
+
+def benign_curve(feats, meta, W=60, N=2, thr=0.9, seed=0):
+    """false alarms on one held-out benign run vs how many other benign runs the
+    model was trained on (attack runs always in training). RF, prefix variant."""
+    y, groups = meta.label.values, meta.lineage.values
+    is_ben = meta.session.str.startswith("benign").values
+    ben_runs = sorted(meta.run[is_ben].unique())
+    att = np.where(~is_ben)[0]
+    rows = []
+    for held in ben_runs:
+        others = [r for r in ben_runs if r != held]
+        order = list(np.random.RandomState(seed).permutation(others))
+        te = np.where(meta.run.values == held)[0]
+        plat = meta.platform.values[te[0]]
+        for k in range(len(order) + 1):
+            tr = np.concatenate([att, np.where(meta.run.isin(order[:k]).values)[0]])
+            score, _ = fit_models(feats, y, groups, tr, "prefix")["Random Forest"]
+            S = np.column_stack([score(feats[ag].values[te]) for ag in AGES])
+            mh = detection_times(meta, feats, te, S >= thr)
+            r = host_window(mh, W, N)[0]
+            same = sum(meta.platform[meta.run == o].iloc[0] == plat for o in order[:k])
+            rows.append(dict(held_out=held, platform=plat, benign_runs_in_train=k, same_platform_in_train=same,
+                             process_fpr=float((S[:, -1] >= thr).mean()), process_fpr_age0=float((S[:, 0] >= thr).mean()),
+                             false_alarms=r["false_alarms"], hours=r["hours"],
+                             fa_per_hour=r["false_alarms"] / r["hours"]))
+            print("  curve %s k=%d  fpr=%.3f  fa/h=%.1f" % (held, k, rows[-1]["process_fpr"], rows[-1]["fa_per_hour"]), flush=True)
+    return pd.DataFrame(rows)
 
 
 def fit_models(feats, y, groups, tr, variant):
@@ -157,15 +186,31 @@ def _selftest():
 
 
 def main():
+    global OUT
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=1, help="alert a lineage tree once >= k of its processes are flagged")
     ap.add_argument("--thr", type=float, default=0.5, help="Random Forest probability threshold")
     ap.add_argument("--tag", default="", help="suffix for output files")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--merged", default=rx.MERGED, help="merged CSV inside host/dataset")
+    ap.add_argument("--out", default=OUT)
+    ap.add_argument("--benign-curve", action="store_true",
+                    help="only the false-alarm learning curve over the number of benign runs")
     a = ap.parse_args()
     if a.selftest:
         return _selftest()
+    OUT = a.out
+    rx.MERGED = a.merged
     os.makedirs(OUT, exist_ok=True)
+    if a.benign_curve:
+        raw, _ = rx.load()
+        feats, meta = prefix_features(raw)
+        c = benign_curve(feats, meta)
+        c.to_csv(os.path.join(OUT, "benign_curve.csv"), index=False)
+        s = c.groupby("benign_runs_in_train")[["process_fpr", "process_fpr_age0", "fa_per_hour"]].agg(["mean", "std"])
+        s.round(3).to_csv(os.path.join(OUT, "benign_curve_summary.csv"))
+        print(s.round(3).to_string())
+        return
     global RF_THR
     RF_THR = a.thr
     sfx = a.tag or "_k%d_thr%g" % (a.k, a.thr)
