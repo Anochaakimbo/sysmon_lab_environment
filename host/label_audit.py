@@ -90,7 +90,7 @@ def processes(df):
     known = set(p.index)
     p["parent_status"] = np.where(p.pkey == "", "no_parent_info",
                                   np.where(p.pkey.isin(known), "observed", "parent_not_logged"))
-    p["attack_run"] = (p.scenario != "benign").astype(int)
+    p["attack_run"] = (~p.scenario.str.startswith("benign")).astype(int)
     p["lineage_chain"] = chains(p)
     return p
 

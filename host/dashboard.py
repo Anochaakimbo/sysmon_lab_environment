@@ -75,8 +75,8 @@ def _registry():
 REGISTRY = _registry()
 
 # preset ชุด scenario สะอาดของแต่ละแพลตฟอร์ม
-CLEAN_SET_LINUX = ["benign", "ransomware", "botnet", "miner", "exploit", "trojan"]
-CLEAN_SET_WIN = ["benign_win", "ransomware_win", "botnet_win", "miner_win",
+CLEAN_SET_LINUX = ["benign", "benign_admin", "benign_dev", "ransomware", "botnet", "miner", "exploit", "trojan"]
+CLEAN_SET_WIN = ["benign_win", "benign_admin_win", "benign_dev_win", "ransomware_win", "botnet_win", "miner_win",
                  "exploit_win", "trojan_win"]
 CLEAN_SET = CLEAN_SET_LINUX + CLEAN_SET_WIN
 
@@ -513,8 +513,8 @@ tbody tr:last-child td{border-bottom:none}
 </div>
 <script>
 const $=s=>document.querySelector(s);
-const CLEAN_LINUX=["benign","ransomware","botnet","miner","exploit","trojan"];
-const CLEAN_WIN=["benign_win","ransomware_win","botnet_win","miner_win","exploit_win","trojan_win"];
+const CLEAN_LINUX=["benign","benign_admin","benign_dev","ransomware","botnet","miner","exploit","trojan"];
+const CLEAN_WIN=["benign_win","benign_admin_win","benign_dev_win","ransomware_win","botnet_win","miner_win","exploit_win","trojan_win"];
 const CLEAN=CLEAN_LINUX.concat(CLEAN_WIN);
 let scenarios=[];
 async function j(u,m,b){

@@ -48,6 +48,15 @@ SCENARIOS = {
         "script": "benign.ps1",
         "label": "session:0",
     },
+    # benign เพิ่ม 8 ต.ค. 2026: คำสั่งชุดเดียวกับ ART แต่เป็นงานปกติ (ดู docstring ในสคริปต์)
+    "benign_admin_win": {
+        "script": "benign_admin_win.ps1",
+        "label": "session:0",
+    },
+    "benign_dev_win": {
+        "script": "benign_dev_win.ps1",
+        "label": "session:0",
+    },
     # scenario มัลแวร์ - ART-driven ทั้งหมด (ดู CLAUDE.md)
     # เลข atomic test ยืนยันกับ ART จริงบน wintarget แล้ว 23 ส.ค. 2026
     "ransomware_win": {

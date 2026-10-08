@@ -82,6 +82,15 @@ SCENARIOS = {
         "script": "benign.sh",
         "label": "session:0",
     },
+    # benign เพิ่ม 8 ต.ค. 2026: คำสั่งชุดเดียวกับ ART แต่เป็นงานปกติ (ดู docstring ในสคริปต์)
+    "benign_admin": {
+        "script": "benign_admin.sh",
+        "label": "session:0",
+    },
+    "benign_dev": {
+        "script": "benign_dev.sh",
+        "label": "session:0",
+    },
     "ransomware": {
         "script": "ransomware.sh",
         "label": "lineage",

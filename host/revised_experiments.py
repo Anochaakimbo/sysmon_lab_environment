@@ -246,7 +246,7 @@ def p2_leave_one_run_out(X, y, meta):
 def p3_leave_one_scenario_out(X, y, meta):
     rows = []
     groups = meta.lineage.values
-    for sc in sorted(set(meta.scenario) - {"benign"}):
+    for sc in sorted(s for s in set(meta.scenario) if not s.startswith("benign")):
         te = np.where(meta.scenario.values == sc)[0]
         tr = np.where(meta.scenario.values != sc)[0]
         tag = dict(Protocol="P3_leave_one_scenario_out", HeldOut=sc, n_test=len(te),
