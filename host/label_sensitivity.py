@@ -18,8 +18,6 @@ os.environ["FAST"] = "1"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 OUT = os.path.join(_ROOT, "reference", "label_audit")
-# revised_experiments reads its data/output dirs from argv at import time
-sys.argv = [sys.argv[0], os.path.join(_HERE, "dataset"), os.path.join(OUT, "_rx_tmp")]
 sys.path.insert(0, _HERE)
 import numpy as np
 import pandas as pd

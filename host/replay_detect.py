@@ -25,33 +25,37 @@ Outputs (reference/replay/):
   incidents.csv        per attack lineage tree: detected?, time-to-detect
   false_alarms.csv     benign-only lineage trees alerted, per run, per hour
   summary.csv          one row per protocol x model x variant
+  host_alerts.csv      per run: host-level alerts for every (threshold, W, N)
+  host_summary.csv     host-level detection / time-to-detect / false alarms per hour
 
-usage: python host/replay_detect.py [--k 1]
+Two alert units:
+  lineage tree  (--k)   alert once >= k processes of one lineage tree are flagged
+  host window   (W, N)  alert once >= N processes of one host are flagged within
+                        W seconds; then stay quiet for W seconds (one alert per burst).
+                        An alert is a true alert if any flagged process in its window
+                        has label 1; otherwise it is a false alarm. This is how a SOC
+                        sees it: one alert per host per burst, not one per process.
+
+usage: python host/replay_detect.py [--k 1] [--thr 0.5]
 """
 import argparse, os, sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 OUT = os.path.join(_ROOT, "reference", "replay")
-# revised_experiments reads its data/output dirs from argv at import time
-_argv = sys.argv[:]
-sys.argv = [sys.argv[0], os.path.join(_HERE, "dataset"), os.path.join(OUT, "_rx_tmp")]
 sys.path.insert(0, _HERE)
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 import revised_experiments as rx
-sys.argv = _argv
-try:
-    os.rmdir(os.path.join(OUT, "_rx_tmp"))
-except OSError:
-    pass
 
 AGES = [0, 1, 2, 5, 10, 30, 60, 300, np.inf]
 CHECK_S = 5
 RF_THR = 0.5
+RF_THRS = (0.5, 0.7, 0.9)        # host-window grid
+WINDOWS = (30, 60, 120, 300)
+MIN_PROCS = (1, 2, 3, 5)
 
 
 def prefix_features(raw):
@@ -97,8 +101,59 @@ def fit_models(feats, y, groups, tr, variant):
     lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(sc.transform(Xb))
     Xc = np.vstack([feats[a].values[tr][ben[cal_i]] for a in ages])
     thr = np.quantile(-lof.score_samples(sc.transform(Xc)), 1 - rx.TARGET_FPR)
-    return {"Random Forest": lambda Z: rf.predict_proba(Z)[:, 1] >= RF_THR,
-            "Local Outlier Factor": lambda Z: -lof.score_samples(sc.transform(Z)) > thr}
+    # (score function, thresholds to sweep); flagged = score >= threshold
+    return {"Random Forest": (lambda Z: rf.predict_proba(Z)[:, 1], RF_THRS),
+            "Local Outlier Factor": (lambda Z: -lof.score_samples(sc.transform(Z)) - thr + 1e-12, (0.0,))}
+
+
+def detection_times(meta, feats, te, flags):
+    """wall-clock time each test process is first flagged (NaT if never)."""
+    first = np.array([AGES[np.argmax(r)] if r.any() else np.nan for r in flags])
+    # age inf = flagged only once the whole process is seen -> use its last event time
+    end = meta.start.iloc[te] + pd.to_timedelta(feats[np.inf].dur_s.values[te], unit="s")
+    det = meta.start.iloc[te] + pd.to_timedelta(np.where(np.isfinite(first), first, 0), unit="s")
+    return meta.iloc[te].assign(hit=~np.isnan(first), det=det.where(~np.isinf(first), end))
+
+
+def host_window(m, W, N):
+    """one row per run: alerts raised by the (W, N) rule over the flagged processes of that host."""
+    rows = []
+    for run, g in m.groupby("run"):
+        f = g[g.hit].sort_values("det")
+        t = (f.det - g.start.min()).dt.total_seconds().values
+        lab = f.label.values
+        alerts, tp, first_tp, last = 0, 0, np.nan, -np.inf
+        for i in range(len(t)):
+            lo = np.searchsorted(t, t[i] - W, side="right")
+            if i - lo + 1 >= N and t[i] - last >= W:
+                last = t[i]
+                alerts += 1
+                if lab[lo:i + 1].any():
+                    tp += 1
+                    if np.isnan(first_tp):
+                        first_tp = t[i]
+        att = g[g.label == 1]
+        a0 = (att.start.min() - g.start.min()).total_seconds() if len(att) else np.nan
+        rows.append(dict(run=run, platform=g.platform.iloc[0], scenario=g.scenario.iloc[0],
+                         attack_run=int(len(att) > 0), alerts=alerts, true_alerts=tp, false_alarms=alerts - tp,
+                         detected=int(tp > 0) if len(att) else np.nan,
+                         ttd_s=first_tp - a0 if len(att) else np.nan,
+                         hours=g.run_hours.iloc[0]))
+    return rows
+
+
+def _selftest():
+    """burst of 3 benign flags at 0-2 s, attack starts at 100 s, flagged at 100 and 101 s."""
+    t0 = pd.Timestamp("2026-01-01")
+    m = pd.DataFrame(dict(run="r", platform="linux", scenario="x", run_hours=1.0,
+                          start=[t0 + pd.Timedelta(seconds=s) for s in (0, 1, 2, 100, 101, 500)],
+                          label=[0, 0, 0, 1, 1, 1], hit=[True, True, True, True, True, False]))
+    m["det"] = m.start
+    r = host_window(m, W=60, N=2)[0]
+    assert (r["alerts"], r["true_alerts"], r["false_alarms"], r["ttd_s"]) == (2, 1, 1, 1.0), r
+    r = host_window(m, W=60, N=3)[0]
+    assert (r["alerts"], r["true_alerts"], r["detected"]) == (1, 0, 0), r
+    print("selftest ok")
 
 
 def main():
@@ -106,7 +161,10 @@ def main():
     ap.add_argument("--k", type=int, default=1, help="alert a lineage tree once >= k of its processes are flagged")
     ap.add_argument("--thr", type=float, default=0.5, help="Random Forest probability threshold")
     ap.add_argument("--tag", default="", help="suffix for output files")
+    ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    if a.selftest:
+        return _selftest()
     os.makedirs(OUT, exist_ok=True)
     global RF_THR
     RF_THR = a.thr
@@ -115,23 +173,26 @@ def main():
     feats, meta = prefix_features(raw)
     y, groups = meta.label.values, meta.lineage.values
 
-    by_age, incidents, fas = [], [], []
+    by_age, incidents, fas, hosts = [], [], [], []
     for proto, held, te_mask in folds(meta):
         tr, te = np.where(~te_mask)[0], np.where(te_mask)[0]
         for variant in ("full", "prefix"):
-            for model, predict in fit_models(feats, y, groups, tr, variant).items():
-                flags = np.column_stack([predict(feats[ag].values[te]) for ag in AGES])  # (n_te, n_ages)
+            for model, (score, thrs) in fit_models(feats, y, groups, tr, variant).items():
+                S = np.column_stack([score(feats[ag].values[te]) for ag in AGES])  # (n_te, n_ages)
+                for th in thrs:
+                    mh = detection_times(meta, feats, te, S >= th)
+                    for W in WINDOWS:
+                        for N in MIN_PROCS:
+                            for r in host_window(mh, W, N):
+                                hosts.append(dict(Protocol=proto, HeldOut=held, Variant=variant, Model=model,
+                                                  thr=th, W=W, N=N, **r))
+                flags = S >= (RF_THR if model == "Random Forest" else 0.0)
                 yt = y[te]
                 for j, ag in enumerate(AGES):
                     by_age.append(dict(Protocol=proto, HeldOut=held, Variant=variant, Model=model, Age=ag,
                                        Recall=flags[yt == 1, j].mean() if (yt == 1).any() else np.nan,
                                        FPR=flags[yt == 0, j].mean() if (yt == 0).any() else np.nan))
-                # first age a process is flagged (inf if never) -> wall-clock detection time
-                first = np.array([AGES[np.argmax(r)] if r.any() else np.nan for r in flags])
-                # age inf = flagged only once the whole process is seen -> use its last event time
-                end = meta.start.iloc[te] + pd.to_timedelta(feats[np.inf].dur_s.values[te], unit="s")
-                det = meta.start.iloc[te] + pd.to_timedelta(np.where(np.isfinite(first), first, 0), unit="s")
-                m = meta.iloc[te].assign(hit=~np.isnan(first), det=det.where(~np.isinf(first), end))
+                m = detection_times(meta, feats, te, flags)
                 # attack incidents = label-1 processes grouped by lineage tree
                 for (run, lin), g in m[m.label == 1].groupby(["run", "lineage"]):
                     hit = g[g.hit]
@@ -167,6 +228,21 @@ def main():
     s.to_csv(os.path.join(OUT, "summary%s.csv" % sfx), index=False)
     pd.set_option("display.width", 250)
     print(s.round(3).to_string(index=False))
+    h = pd.DataFrame(hosts)
+    h.to_csv(os.path.join(OUT, "host_alerts.csv"), index=False)
+    hk = ["Model", "Variant", "thr", "W", "N"]
+    att = h[h.attack_run == 1].groupby(["Protocol"] + hk).agg(
+        attack_runs=("detected", "size"), detected=("detected", "mean"),
+        ttd_median_s=("ttd_s", "median"), ttd_max_s=("ttd_s", "max"),
+        fa_attack_runs=("false_alarms", "sum"), h_attack_runs=("hours", "sum"))
+    ben = h[(h.Protocol == "BEN")].groupby(hk).agg(fa_benign=("false_alarms", "sum"), h_benign=("hours", "sum"))
+    hs = att.reset_index().merge(ben.reset_index(), on=hk, how="left")
+    hs["fa_per_hour_attack_runs"] = hs.fa_attack_runs / hs.h_attack_runs
+    hs["fa_per_hour_unseen_benign"] = hs.fa_benign / hs.h_benign
+    hs.to_csv(os.path.join(OUT, "host_summary.csv"), index=False)
+    best = hs[(hs.Protocol == "P3")].sort_values(["fa_per_hour_unseen_benign", "detected"], ascending=[True, False])
+    print("\nhost-window alerts, P3 (unseen attack) - lowest false alarms on unseen benign first:")
+    print(best.round(2).head(15).to_string(index=False))
     print("(live detector adds up to %ds scan delay to every ttd) -> %s" % (CHECK_S, OUT))
 
 

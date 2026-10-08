@@ -44,9 +44,8 @@ warnings.filterwarnings("ignore")
 SEED = 0
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # usage: python host/revised_experiments.py [dataset_dir] [output_dir]
-DATA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_HERE, "dataset")
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(_HERE), "reference", "revised_results")
-os.makedirs(OUT, exist_ok=True)
+DATA = os.path.join(_HERE, "dataset")
+OUT = os.path.join(os.path.dirname(_HERE), "reference", "revised_results")
 NULL_GUID = "{00000000-0000-0000-0000-000000000000}"
 EXTRA_RUNS = ["ransomware_dash_213312_20260825_213312", "trojan_dash_211024_20260825_211024"]
 EVENT_IDS = [1, 2, 3, 4, 5, 8, 9, 11, 12, 13, 23]
@@ -304,6 +303,10 @@ def split_strategy_rf(X, y, meta, repeats=5):
 
 
 def main():
+    global DATA, OUT
+    DATA = sys.argv[1] if len(sys.argv) > 1 else DATA
+    OUT = sys.argv[2] if len(sys.argv) > 2 else OUT
+    os.makedirs(OUT, exist_ok=True)
     t0 = time.time()
     raw, extra = load()
     summary = {}
