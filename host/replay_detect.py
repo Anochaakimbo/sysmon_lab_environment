@@ -68,7 +68,9 @@ ENGINE = re.compile(r"Invoke-AtomicRedTeam|Invoke-AtomicTest|run_atomic\.sh|ATOM
                     r"|powershell\.exe\"? -Version 5\.1 -s -NoLogo -NoProfile"
                     r"|New-Item -ItemType Directory -Path C:\\lab_sandbox"
                     # vagrant ssh delivery of the scenario: login-session motd scripts and the copy step
-                    r"|/vagrant/scenarios/|update-motd|landscape-sysinfo|^/usr/sbin/sshd -D -R$", re.I)
+                    r"|/vagrant/scenarios/|update-motd|landscape-sysinfo|^/usr/sbin/sshd -D -R$"
+                    # live log forwarder of the Windows VM (scenarios_win/stream_sysmon.ps1)
+                    r"|stream_sysmon\.ps1|LabSysmonStream", re.I)
 HELPER = re.compile(r"^(sleep \d+|tail -\d+|true|locale|/usr/bin/locale-check \S+|setsid --wait true"
                     # scenario work-dir setup: attack uses /tmp/lab_sandbox/*, benign /tmp/benign_* -> path-only signal
                     r"|date -u \+%Y-%m-%dT%H:%M:%SZ|(sudo )?mkdir -p /tmp/(lab_sandbox|benign_\w+)(/\S*)?"
@@ -194,18 +196,21 @@ def behavior_parent(meta, img, a):
     return out
 
 
-def prefix_features(raw, behavior=False):
-    """features of every process cut at each age; index = composite key."""
+def prefix_features(raw, behavior=False, ages=None, quiet=False):
+    """features of every process cut at each age; index = composite key.
+    live_detector passes ages=[np.inf]: features of what each process has done so far."""
+    ages = AGES if ages is None else ages
     df = raw[raw.ProcessGuid.notna() & (raw.ProcessGuid != rx.NULL_GUID)].copy()
     ts = pd.to_datetime(df.UtcTime, errors="coerce")
     key = df.platform + "|" + df.run_id + "|" + df.ProcessGuid
     start = ts.groupby(key).transform("min")
     age = (ts - start).dt.total_seconds()
     feats = {}
-    for a in AGES:
+    for a in ages:
         f, _, _ = rx.aggregate(df[age <= a], "composite")
         feats[a] = f
-        print("  features at age %s: %d processes" % (a, len(f)), flush=True)
+        if not quiet:
+            print("  features at age %s: %d processes" % (a, len(f)), flush=True)
     _, meta, _ = rx.aggregate(df, "composite")
     meta["start"] = ts.groupby(key).min().reindex(meta.index)
     g = df.groupby(key)
@@ -213,15 +218,16 @@ def prefix_features(raw, behavior=False):
     meta["harness"] = harness_mask(first("Image"), first("CommandLine"), first("ParentCommandLine")).values
     run_span = ts.groupby(df.run_id).agg(["min", "max"])
     meta["run_hours"] = meta.run.map((run_span["max"] - run_span["min"]).dt.total_seconds() / 3600)
-    for a in AGES:   # same rows, same order at every age
+    for a in ages:   # same rows, same order at every age
         feats[a] = feats[a].reindex(meta.index).fillna(0)
     if behavior:
         r = behavior_rows(df, key, ts)
         st = behavior_static(meta, first("Image"), first("CommandLine"))
-        for a in AGES:
+        for a in ages:
             feats[a] = pd.concat([feats[a], behavior_at(r, meta.start, a, meta.index), st,
                                   behavior_parent(meta, first("Image"), a)], axis=1)
-        print("  + %d behaviour features" % (feats[np.inf].shape[1] - 32), flush=True)
+        if not quiet:
+            print("  + %d behaviour features" % (feats[ages[-1]].shape[1] - 32), flush=True)
     return feats, meta
 
 
