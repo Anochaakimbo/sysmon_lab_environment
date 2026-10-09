@@ -38,7 +38,7 @@ Two alert units:
 
 usage: python host/replay_detect.py [--k 1] [--thr 0.5]
 """
-import argparse, os, sys
+import argparse, os, re, sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 OUT = os.path.join(_ROOT, "reference", "replay")
@@ -58,6 +58,31 @@ WINDOWS = (60, 300)
 MIN_PROCS = (1, 2, 3)
 
 
+# ---- lab harness: processes of the test framework, not of the attack -------------------
+# Atomic Red Team engine and its Windows Start-Job worker, the orchestrator/_lib launchers,
+# ART prerequisite checks and empty executor wrappers, and pacing/setup helpers.
+# They exist in benign and attack runs alike but get the label of the run they are in,
+# so a model can score high by recognising the framework (replay_v2/harness_probe.csv).
+ENGINE = re.compile(r"Invoke-AtomicRedTeam|Invoke-AtomicTest|run_atomic\.sh|ATOMIC_TIMEOUT"
+                    r"|lab_sandbox[\\/][\w.-]+\.(sh|ps1)\b|_lib\.(sh|ps1)"
+                    r"|powershell\.exe\"? -Version 5\.1 -s -NoLogo -NoProfile"
+                    r"|New-Item -ItemType Directory -Path C:\\lab_sandbox", re.I)
+HELPER = re.compile(r"^(sleep \d+|tail -\d+|true|locale|/usr/bin/locale-check \S+|setsid --wait true"
+                    r"|date -u \+%Y-%m-%dT%H:%M:%SZ|mkdir -p /tmp/lab_sandbox"
+                    r"|\"(powershell|cmd)\.exe\" (& \{\}|/c))\s*$"
+                    r"|\{\s*exit 0\s*\}\s*else\s*\{\s*exit 1\s*\}|\(\s*EXIT 0\s*\)\s*ELSE\s*\(\s*EXIT 1\s*\)", re.I)
+SHELLS = {"sh", "bash", "dash", "cmd.exe", "powershell.exe", "pwsh"}
+
+
+def harness_mask(img, cmd, pcmd):
+    """True for lab-harness processes. Children of the ART engine that are not a shell are its
+    own bookkeeping (hostname/id/whoami for the log); shells under it run the test -> kept."""
+    base = img.fillna("").str.split(r"[\\/]").str[-1].str.lower()
+    cmd, pcmd = cmd.fillna(""), pcmd.fillna("")
+    return (cmd.str.contains(ENGINE) | cmd.str.contains(HELPER) | (base == "conhost.exe")
+            | (pcmd.str.contains(r"Invoke-AtomicRedTeam|-Version 5\.1 -s -NoLogo", case=False) & ~base.isin(SHELLS)))
+
+
 def prefix_features(raw):
     """features of every process cut at each age; index = composite key."""
     df = raw[raw.ProcessGuid.notna() & (raw.ProcessGuid != rx.NULL_GUID)].copy()
@@ -72,10 +97,25 @@ def prefix_features(raw):
         print("  features at age %s: %d processes" % (a, len(f)), flush=True)
     _, meta, _ = rx.aggregate(df, "composite")
     meta["start"] = ts.groupby(key).min().reindex(meta.index)
+    g = df.groupby(key)
+    first = lambda c: g[c].agg(lambda v: v.dropna().iloc[0] if v.notna().any() else None).reindex(meta.index)
+    meta["harness"] = harness_mask(first("Image"), first("CommandLine"), first("ParentCommandLine")).values
     run_span = ts.groupby(df.run_id).agg(["min", "max"])
     meta["run_hours"] = meta.run.map((run_span["max"] - run_span["min"]).dt.total_seconds() / 3600)
     for a in AGES:   # same rows, same order at every age
         feats[a] = feats[a].reindex(meta.index).fillna(0)
+    return feats, meta
+
+
+def load_features(raw, no_harness=False):
+    feats, meta = prefix_features(raw)
+    h = meta.harness.values
+    print("harness processes: %d of %d (label 1: %d, label 0: %d)%s"
+          % (h.sum(), len(h), (h & (meta.label == 1)).sum(), (h & (meta.label == 0)).sum(),
+             " -> dropped" if no_harness else ""), flush=True)
+    if no_harness:
+        feats = {a: f[~h] for a, f in feats.items()}
+        meta = meta[~h]
     return feats, meta
 
 
@@ -182,6 +222,17 @@ def _selftest():
     assert (r["alerts"], r["true_alerts"], r["false_alarms"], r["ttd_s"]) == (2, 1, 1, 1.0), r
     r = host_window(m, W=60, N=3)[0]
     assert (r["alerts"], r["true_alerts"], r["detected"]) == (1, 0, 0), r
+    H = lambda img, c, pc="": bool(harness_mask(pd.Series([img]), pd.Series([c]), pd.Series([pc]))[0])
+    assert H("/usr/bin/pwsh", "pwsh -NoProfile -Command Import-Module '/opt/AtomicRedTeam/invoke-atomicredteam/Invoke-AtomicRedTeam.psd1'")
+    assert H("/usr/bin/bash", "bash /tmp/lab_sandbox/run_atomic.sh T1082 3")
+    assert H("/usr/bin/hostname", "hostname", "pwsh -NoProfile -Command Import-Module Invoke-AtomicRedTeam")
+    assert H(r"C:\Windows\System32\cmd.exe", r'"C:\Windows\system32\cmd.exe" /c IF EXIST "%temp%\x" ( EXIT 0 ) ELSE ( EXIT 1 )')
+    assert H(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+             r'"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -Version 5.1 -s -NoLogo -NoProfile')
+    assert not H(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                 r'"powershell.exe" & {Compress-Archive -Path C:\x -DestinationPath $env:TEMP\a.zip}')
+    assert not H("/usr/bin/sh", "sh -c whoami", "pwsh -NoProfile -Command Import-Module Invoke-AtomicRedTeam")
+    assert not H("/usr/bin/openssl", "openssl enc -aes-256-cbc -in /tmp/lab_sandbox/victim_files/a.txt")
     print("selftest ok")
 
 
@@ -194,6 +245,8 @@ def main():
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--merged", default=rx.MERGED, help="merged CSV inside host/dataset")
     ap.add_argument("--out", default=OUT)
+    ap.add_argument("--no-harness", action="store_true",
+                    help="drop lab-harness processes (ART engine, launchers, helpers) from training and test")
     ap.add_argument("--benign-curve", action="store_true",
                     help="only the false-alarm learning curve over the number of benign runs")
     a = ap.parse_args()
@@ -204,7 +257,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if a.benign_curve:
         raw, _ = rx.load()
-        feats, meta = prefix_features(raw)
+        feats, meta = load_features(raw, a.no_harness)
         c = benign_curve(feats, meta)
         c.to_csv(os.path.join(OUT, "benign_curve.csv"), index=False)
         s = c.groupby("benign_runs_in_train")[["process_fpr", "process_fpr_age0", "fa_per_hour"]].agg(["mean", "std"])
@@ -215,7 +268,7 @@ def main():
     RF_THR = a.thr
     sfx = a.tag or "_k%d_thr%g" % (a.k, a.thr)
     raw, _ = rx.load()
-    feats, meta = prefix_features(raw)
+    feats, meta = load_features(raw, a.no_harness)
     y, groups = meta.label.values, meta.lineage.values
 
     by_age, incidents, fas, hosts = [], [], [], []
