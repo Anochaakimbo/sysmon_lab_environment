@@ -196,18 +196,50 @@ def behavior_parent(meta, img, a):
     return out
 
 
+# ---- launcher syntax -----------------------------------------------------------------------
+# ART runs every test as `"powershell.exe" & {<cmd>}` or `"cmd.exe" /c <cmd>`, our benign scripts as
+# `powershell -NoProfile ... -Command "<cmd>"` / `cmd /c "<cmd>"`, Linux tests as `sh -c <cmd>`.
+# The wrapper says which tool launched the command, not what it does, and differs by class
+# (b_chain counted ART's ` & `: benign 0.024 vs attack 0.227 on Windows). Features see the payload only.
+_PS = r'^\s*"?(?:[A-Za-z]:\\[^"]*\\)?(?:powershell|pwsh)(?:\.exe)?"?\s+(?:-(?!c\b|command\b)\w+(?:\s+(?!-)[^\s"&{]+)?\s+)*'
+UNWRAP = [re.compile(_PS + r'&\s*\{(.*)\}\s*$', re.I | re.S),
+          re.compile(_PS + r'-(?:c|command)\s+"?(.*?)"?\s*$', re.I | re.S),
+          re.compile(r'^\s*"?(?:[A-Za-z]:\\[^"]*\\)?cmd(?:\.exe)?"?\s+/[ck]\s+"?(.*?)"?\s*$', re.I | re.S),
+          re.compile(r'^\s*(?:/\S*/)?(?:ba|da)?sh\s+-c\s+[\'"]?(.*?)[\'"]?\s*$', re.S)]
+
+
+def unwrap(cmd):
+    """strip launcher syntax (repeatedly: `cmd /c powershell -c "..."`) -> the command that runs."""
+    def one(c):
+        if not isinstance(c, str):
+            return c
+        for _ in range(3):
+            for rx_ in UNWRAP:
+                m = rx_.match(c)
+                if m:
+                    c = m.group(1).strip()
+                    break
+            else:
+                break
+        return c
+    return cmd.map(one)
+
+
 def prefix_features(raw, behavior=False, ages=None, quiet=False):
     """features of every process cut at each age; index = composite key.
-    live_detector passes ages=[np.inf]: features of what each process has done so far."""
+    live_detector passes ages=[np.inf]: features of what each process has done so far.
+    Harness detection uses the raw command line; features use unwrap()ped command lines."""
     ages = AGES if ages is None else ages
     df = raw[raw.ProcessGuid.notna() & (raw.ProcessGuid != rx.NULL_GUID)].copy()
     ts = pd.to_datetime(df.UtcTime, errors="coerce")
     key = df.platform + "|" + df.run_id + "|" + df.ProcessGuid
     start = ts.groupby(key).transform("min")
     age = (ts - start).dt.total_seconds()
+    dfn = df.copy()
+    dfn["CommandLine"], dfn["ParentCommandLine"] = unwrap(df.CommandLine), unwrap(df.ParentCommandLine)
     feats = {}
     for a in ages:
-        f, _, _ = rx.aggregate(df[age <= a], "composite")
+        f, _, _ = rx.aggregate(dfn[age <= a], "composite")
         feats[a] = f
         if not quiet:
             print("  features at age %s: %d processes" % (a, len(f)), flush=True)
@@ -222,7 +254,9 @@ def prefix_features(raw, behavior=False, ages=None, quiet=False):
         feats[a] = feats[a].reindex(meta.index).fillna(0)
     if behavior:
         r = behavior_rows(df, key, ts)
-        st = behavior_static(meta, first("Image"), first("CommandLine"))
+        gn = dfn.groupby(key)
+        cmd_n = gn.CommandLine.agg(lambda v: v.dropna().iloc[0] if v.notna().any() else None).reindex(meta.index)
+        st = behavior_static(meta, first("Image"), cmd_n)
         for a in ages:
             feats[a] = pd.concat([feats[a], behavior_at(r, meta.start, a, meta.index), st,
                                   behavior_parent(meta, first("Image"), a)], axis=1)
@@ -371,6 +405,14 @@ def _selftest():
     bb = behavior_parent(bm, pd.Series(["/usr/bin/curl"] * 4, index=bm.index), 1e9)
     assert bb.b_sib_period_cv.tolist() == [0.0] * 4 and bb.b_sib_period_s.tolist() == [10.0] * 4, bb
     assert _entropy("aaaa") == 0.0 and abs(_entropy("ab") - 1.0) < 1e-9
+    U = lambda c: unwrap(pd.Series([c]))[0]
+    assert U('"powershell.exe" & {Get-Process}') == "Get-Process"
+    assert U(r'"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Get-Service | Out-File x"') == "Get-Service | Out-File x"
+    assert U('"cmd.exe" /c tasklist | findstr lsass') == "tasklist | findstr lsass"
+    assert U(r'"C:\Windows\system32\cmd.exe" /c "certutil -hashfile App.cs SHA256 > SUMS.txt"') == "certutil -hashfile App.cs SHA256 > SUMS.txt"
+    assert U("sh -c 'whoami'") == "whoami" and U("/bin/sh -c uname -a") == "uname -a"
+    assert U("openssl enc -aes-256-cbc -in a") == "openssl enc -aes-256-cbc -in a"
+    assert U('"powershell.exe" -Version 5.1 -s -NoLogo -NoProfile') == '"powershell.exe" -Version 5.1 -s -NoLogo -NoProfile'
     print("selftest ok")
 
 

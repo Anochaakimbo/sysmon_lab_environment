@@ -745,14 +745,17 @@ async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT);
 async function liveDemo(){const n=$('#livesc').value;
   if(!confirm(`Live demo: ${n}\nrevert + boot wintarget แล้วรัน 1 รอบ (~10-15 นาที)`))return;
   const r=await j('/api/live_demo','POST',{scenario:n}); if(r.error)alert(r.error)}
+const SEV={high:'var(--bad)',medium:'var(--warn)',low:'#94a3b8'};
 const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function loadAlerts(){
   const al=await j('/api/alerts');
   $('#alertcount').textContent=al.length?`(${al.length})`:'';
   $('#alerts').innerHTML=al.length?al.map(a=>`
-    <div style="border:1px solid var(--border);border-left:4px solid var(--bad);border-radius:9px;padding:10px 12px;margin-bottom:9px">
+    <div style="border:1px solid var(--border);border-left:4px solid ${SEV[a.severity]||'var(--bad)'};border-radius:9px;padding:10px 12px;margin-bottom:9px">
       <div style="font-weight:600">#${a.alert} &nbsp;${esc(a.time).slice(0,19)} UTC
+        ${a.severity?`<span class="tag" style="background:${SEV[a.severity]};color:#fff">${a.severity.toUpperCase()}</span>`:''}
         <span style="color:var(--mut);font-weight:400;font-size:12px">· ${esc(a.rule)}</span></div>
+      ${(a.techniques||[]).length?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${a.techniques.map(esc).join(' · ')}</div>`:''}
       ${(a.processes||[]).slice(0,4).map(p=>`
         <div style="font-size:12px;margin-top:7px">
           <b style="color:var(--bad)">${(+p.score).toFixed(2)}</b>

@@ -118,14 +118,19 @@ class Detector:
             ev = df[df.ProcessGuid == guid]
             first = ev.iloc[0]
             hit = None
-            for r in ev.fillna("").astype(str).to_dict("records"):
+            rows = ev.fillna("").astype(str)
+            if meta.harness.get(par.get(k), False):
+                rows = rows.assign(ParentCommandLine="")   # a harness parent is not evidence of the attack
+            for r in rows.to_dict("records"):
                 hit = classify(r)
                 if hit:
                     break
+            tech = hit[1] if hit else ""
             self.flagged[guid] = dict(time=str(self.clock), score=round(float(s), 3),
                                       image=_first(ev.Image), cmd=_first(ev.CommandLine)[:200],
                                       parent=_first(ev.ParentImage), lineage=_chain(par, img, k),
-                                      evidence=("%s: %s" % hit[1:]) if hit else "")
+                                      evidence=("%s: %s" % hit[1:]) if hit else "",
+                                      technique=tech, severity=severity(tech))
             self.recent.append((now, guid))
         self.recent = [(t, g) for t, g in self.recent if t > now - self.W]
         if len(self.recent) >= self.N and now - self.last_alert >= self.W:
@@ -136,8 +141,10 @@ class Detector:
         self.alerts += 1
         a = dict(alert=self.alerts, time=str(self.clock), platform=self.platform,
                  rule="%d+ processes flagged within %ds (thr %.2f)" % (self.N, self.W, self.thr),
-                 n_flagged=len(procs), processes=sorted(procs, key=lambda d: -d["score"])[:10])
-        print("\n\033[91m[ALERT %d] %s  %s\033[0m" % (a["alert"], a["time"], a["rule"]))
+                 severity=alert_severity(procs), techniques=sorted({d["technique"] for d in procs} - {""}),
+                 n_flagged=len(procs),
+                 processes=sorted(procs, key=lambda d: (-SEV_RANK[d["severity"]], -d["score"]))[:10])
+        print("\n\033[91m[ALERT %d] %s  %s  severity=%s\033[0m" % (a["alert"], a["time"], a["rule"], a["severity"]))
         for d in a["processes"][:5]:
             print("   %.2f  %-28s %s" % (d["score"], d["image"][-28:], d["cmd"][:90]))
             if d["evidence"]:
@@ -145,6 +152,28 @@ class Detector:
             print("         lineage : %s" % d["lineage"])
         with open(self.out, "a", encoding="utf-8") as f:
             f.write(json.dumps(a, ensure_ascii=False) + "\n")
+
+
+# Severity from the ATT&CK technique of the evidence, not from the model score.
+# Discovery on its own is what admins do every day -> low. An interpreter with no specific
+# technique -> medium. Transfer, staging, persistence, defence evasion, impact -> high.
+DISCOVERY = ("T1007", "T1012", "T1016", "T1033", "T1049", "T1057", "T1069", "T1082", "T1083", "T1087", "T1518")
+SEV_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def severity(technique):
+    if technique.startswith(DISCOVERY):
+        return "low"
+    if not technique or technique.startswith("T1059"):
+        return "medium"
+    return "high"
+
+
+def alert_severity(procs):
+    """highest process severity; three or more distinct techniques in one window = an attack chain -> high."""
+    techs = {d["technique"].split()[0] for d in procs if d["technique"]}
+    top = max((SEV_RANK[d["severity"]] for d in procs), default=0)
+    return "high" if len(techs) >= 3 else [k for k, v in SEV_RANK.items() if v == top][0]
 
 
 def _first(s):
