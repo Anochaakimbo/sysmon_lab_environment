@@ -121,11 +121,10 @@ class Detector:
             rows = ev.fillna("").astype(str)
             if meta.harness.get(par.get(k), False):
                 rows = rows.assign(ParentCommandLine="")   # a harness parent is not evidence of the attack
-            for r in rows.to_dict("records"):
-                hit = classify(r)
-                if hit:
-                    break
-            tech = hit[1] if hit else ""
+            # strongest evidence over all events: DIRECT > PARENT > OSBOOK (OS bookkeeping is not a technique)
+            hits = [h for h in map(classify, rows.to_dict("records")) if h]
+            hit = min(hits, key=lambda h: TIER.index(h[0])) if hits else None
+            tech = hit[1] if hit and hit[0] != "OSBOOK" else ""
             self.flagged[guid] = dict(time=str(self.clock), score=round(float(s), 3),
                                       image=_first(ev.Image), cmd=_first(ev.CommandLine)[:200],
                                       parent=_first(ev.ParentImage), lineage=_chain(par, img, k),
@@ -159,12 +158,13 @@ class Detector:
 # technique -> medium. Transfer, staging, persistence, defence evasion, impact -> high.
 DISCOVERY = ("T1007", "T1012", "T1016", "T1033", "T1049", "T1057", "T1069", "T1082", "T1083", "T1087", "T1518")
 SEV_RANK = {"low": 0, "medium": 1, "high": 2}
+TIER = ["DIRECT", "PARENT", "OSBOOK"]
 
 
 def severity(technique):
     if technique.startswith(DISCOVERY):
         return "low"
-    if not technique or technique.startswith("T1059"):
+    if not technique.startswith("T") or technique.startswith("T1059"):
         return "medium"
     return "high"
 
