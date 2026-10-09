@@ -83,6 +83,14 @@ SCENARIOS = {
         "label": "session:0",
     },
     # benign เพิ่ม 8 ต.ค. 2026: คำสั่งชุดเดียวกับ ART แต่เป็นงานปกติ (ดู docstring ในสคริปต์)
+    # 10 Oct 2026: ART-only, same techniques/order as matched_win - for the cross-OS transfer test
+    "matched": {
+        "script": "matched.sh",
+        "label": "lineage",
+        "seed_dir": "/tmp/lab_sandbox",
+        "seed_cmd": "lab_sandbox",
+        "attack": "T1082,T1057,T1033,T1016,T1049,T1083,T1005,T1074.001,T1053.003,T1027,T1552.001,T1105,T1071.001,T1132.001,T1486,T1496,T1070.004",
+    },
     "benign_admin": {
         "script": "benign_admin.sh",
         "label": "session:0",
