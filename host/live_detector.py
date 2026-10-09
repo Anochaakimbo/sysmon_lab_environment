@@ -174,6 +174,7 @@ def lines(path, follow):
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)   # alerts must show up live when stdout is a file/pipe
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", action="store_true", help="train models/live_rf.joblib and exit")
     ap.add_argument("--train-platforms", default="linux,windows")
