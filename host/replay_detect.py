@@ -66,9 +66,12 @@ MIN_PROCS = (1, 2, 3)
 ENGINE = re.compile(r"Invoke-AtomicRedTeam|Invoke-AtomicTest|run_atomic\.sh|ATOMIC_TIMEOUT"
                     r"|lab_sandbox[\\/][\w.-]+\.(sh|ps1)\b|_lib\.(sh|ps1)"
                     r"|powershell\.exe\"? -Version 5\.1 -s -NoLogo -NoProfile"
-                    r"|New-Item -ItemType Directory -Path C:\\lab_sandbox", re.I)
+                    r"|New-Item -ItemType Directory -Path C:\\lab_sandbox"
+                    # vagrant ssh delivery of the scenario: login-session motd scripts and the copy step
+                    r"|/vagrant/scenarios/|update-motd|landscape-sysinfo|^/usr/sbin/sshd -D -R$", re.I)
 HELPER = re.compile(r"^(sleep \d+|tail -\d+|true|locale|/usr/bin/locale-check \S+|setsid --wait true"
-                    r"|date -u \+%Y-%m-%dT%H:%M:%SZ|mkdir -p /tmp/lab_sandbox"
+                    # scenario work-dir setup: attack uses /tmp/lab_sandbox/*, benign /tmp/benign_* -> path-only signal
+                    r"|date -u \+%Y-%m-%dT%H:%M:%SZ|(sudo )?mkdir -p /tmp/(lab_sandbox|benign_\w+)(/\S*)?"
                     r"|\"(powershell|cmd)\.exe\" (& \{\}|/c))\s*$"
                     r"|\{\s*exit 0\s*\}\s*else\s*\{\s*exit 1\s*\}|\(\s*EXIT 0\s*\)\s*ELSE\s*\(\s*EXIT 1\s*\)", re.I)
 SHELLS = {"sh", "bash", "dash", "cmd.exe", "powershell.exe", "pwsh"}
@@ -162,17 +165,30 @@ def behavior_parent(meta, img, a):
     m = pd.DataFrame(dict(pk=meta.pkey.values, s=meta.start.values,
                           img=img.fillna("").astype(str).str.split(r"[\\/]").str[-1].str.lower().values), index=meta.index)
     m = m[m.pk.notna()]
-    out = pd.DataFrame(0.0, index=meta.index, columns=["b_sib_spawned", "b_sib_same_image", "b_sib_images"])
+    out = pd.DataFrame(0.0, index=meta.index, columns=["b_sib_spawned", "b_sib_same_image", "b_sib_images",
+                                                       "b_sib_period_cv", "b_sib_period_s"])
+    out[["b_sib_period_cv", "b_sib_period_s"]] = -1.0     # fewer than 3 same-image siblings: no period
     for _, g in m.groupby("pk"):
         g = g.sort_values("s")
         t = g.s.values
         lim = t + np.timedelta64(int(min(a, 1e7) * 1000), "ms")
         out.loc[g.index, "b_sib_spawned"] = np.searchsorted(t, lim, side="right")
         same = np.zeros(len(g))
+        cv, per = np.full(len(g), -1.0), np.full(len(g), -1.0)
         for _, gi in g.groupby("img"):
             pos = g.index.get_indexer(gi.index)
-            same[pos] = np.searchsorted(gi.s.values, lim[pos], side="right")
+            n = np.searchsorted(gi.s.values, lim[pos], side="right")
+            same[pos] = n
+            # beacon = same child image re-spawned at a steady interval (one curl/ping process per beat)
+            d = np.diff(gi.s.values).astype("timedelta64[ms]").astype(float) / 1000
+            for j, k in zip(pos, n):
+                if k >= 3:
+                    w = d[:k - 1]
+                    per[j] = w.mean()
+                    cv[j] = w.std() / w.mean() if w.mean() > 0 else 0.0
         out.loc[g.index, "b_sib_same_image"] = same
+        out.loc[g.index, "b_sib_period_cv"] = cv
+        out.loc[g.index, "b_sib_period_s"] = per
         imgs = g.img.values
         out.loc[g.index, "b_sib_images"] = [len(set(imgs[:n])) for n in np.searchsorted(t, lim, side="right")]
     return out
@@ -333,6 +349,10 @@ def _selftest():
              r'"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -Version 5.1 -s -NoLogo -NoProfile')
     assert not H(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
                  r'"powershell.exe" & {Compress-Archive -Path C:\x -DestinationPath $env:TEMP\a.zip}')
+    assert H("/usr/bin/sudo", "sudo cp /vagrant/scenarios/botnet.sh /tmp/lab_sandbox/")
+    assert H("/usr/bin/dash", "/bin/sh /etc/update-motd.d/00-header")
+    assert H("/usr/bin/mkdir", "mkdir -p /tmp/lab_sandbox/trojan") and H("/usr/bin/sudo", "sudo mkdir -p /tmp/lab_sandbox")
+    assert H("/usr/bin/mkdir", "mkdir -p /tmp/benign_admin/reports")
     assert not H("/usr/bin/sh", "sh -c whoami", "pwsh -NoProfile -Command Import-Module Invoke-AtomicRedTeam")
     assert not H("/usr/bin/openssl", "openssl enc -aes-256-cbc -in /tmp/lab_sandbox/victim_files/a.txt")
     mm = pd.DataFrame(dict(pkey=["p", "p", "p", None], start=[t0 + pd.Timedelta(seconds=s) for s in (0, 1, 50, 0)]),
@@ -340,6 +360,10 @@ def _selftest():
     bp = behavior_parent(mm, pd.Series(["/bin/rm", "/bin/rm", "/bin/ls", "/bin/x"], index=mm.index), 5)
     assert bp.b_sib_spawned.tolist() == [2, 2, 3, 0], bp
     assert bp.b_sib_same_image.tolist() == [2, 2, 1, 0] and bp.b_sib_images.tolist() == [1, 1, 2, 0], bp
+    assert (bp.b_sib_period_cv == -1).all(), bp
+    bm = pd.DataFrame(dict(pkey="p", start=[t0 + pd.Timedelta(seconds=s) for s in (0, 10, 20, 30)]), index=list("wxyz"))
+    bb = behavior_parent(bm, pd.Series(["/usr/bin/curl"] * 4, index=bm.index), 1e9)
+    assert bb.b_sib_period_cv.tolist() == [0.0] * 4 and bb.b_sib_period_s.tolist() == [10.0] * 4, bb
     assert _entropy("aaaa") == 0.0 and abs(_entropy("ab") - 1.0) < 1e-9
     print("selftest ok")
 
