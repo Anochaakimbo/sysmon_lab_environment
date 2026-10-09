@@ -120,6 +120,7 @@ IsExecutable, Archived`
 | `vagrant ssh -c` ค้างเงียบ ไม่มีเอาต์พุต | ACL ของ `private_key` กว้างเกิน (Authenticated Users) → OpenSSH ทิ้ง key แล้วตกไปถาม **password ของ vagrant** | `icacls /inheritance:r /grant:r "$USER:(R)"` + `preflight_ssh_key()` เช็คให้ทุกรอบ |
 | log ไม่ถึง host เลยหลัง revert (Send-Q บวมค้าง) | snapshot คืน **memory state** มาด้วย → rsyslogd ตื่นมาพร้อม TCP socket เก่าที่ host ตายไปแล้ว | `systemctl restart rsyslog` หลังบูตทุกครั้ง (orchestrator ทำให้แล้ว) |
 | **FileCreate(11) + RawAccessRead(9) หายเกลี้ยงทั้งรอบ** (event อื่นมาปกติ) | ไม่ใช่ rate limit! snapshot คืน memory state → **eBPF probe ของ sysmon อยู่ในสภาพ stale** ยิง 2 event นี้ไม่ออก | `systemctl restart sysmon` หลังบูต — ยืนยันแล้ว event 11 กลับมา 108 ตัวใน 15 วินาที |
+| **คำสั่งที่ ART รันบน Linux ได้ label 0** (10 ต.ค. 2026) | `pwsh` fork ก่อน exec `sh -c` — Sysmon for Linux ไม่บันทึกตัวกลางที่ fork → `ParentProcessGuid` ว่าง + parent PID ไม่อยู่ใน log → lineage ขาด | **ยังไม่แก้ — บันทึกเป็นข้อจำกัด** orphan = 18.6% ของ process ใน attack run (benign run 0.02%) ≈ 31% ของ process โจมตีถูก label benign รายละเอียด `docs/progress_2026-10-09.md` หัวข้อ 6.1 |
 
 ### เลข Atomic test ที่ยืนยันบน Linux VM แล้ว
 

@@ -22,7 +22,7 @@ sys.path.insert(0, _HERE)
 import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, roc_auc_score
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit, StratifiedGroupKFold
+from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 import revised_experiments as rx
@@ -62,18 +62,27 @@ def tactic_counts(raw, index):
     return c.reindex(index).fillna(0)
 
 
+def proba(m, X):
+    """P(malicious); a model that only saw one class still answers (0 or 1)."""
+    p = m.predict_proba(X)
+    return p[:, list(m.classes_).index(1)] if 1 in m.classes_ else np.zeros(len(X))
+
+
 def run_fold(X, y, run, tr, te, tag):
     rf = RF().fit(X[tr], y[tr])
+    # out-of-fold by run; stratified so every training split keeps both classes
+    # (the matched dataset has only 3 attack + 3 benign runs per OS)
     oof = np.zeros(len(tr))
-    for a, b in GroupKFold(5).split(X[tr], y[tr], run[tr]):
-        oof[b] = RF().fit(X[tr][a], y[tr][a]).predict_proba(X[tr][b])[:, 1]
+    k = min(5, len(set(run[tr][y[tr] == 1])), len(set(run[tr][y[tr] == 0])))
+    for a, b in StratifiedGroupKFold(max(k, 2), shuffle=True, random_state=0).split(X[tr], y[tr], run[tr]):
+        oof[b] = proba(RF().fit(X[tr][a], y[tr][a]), X[tr][b])
     thr = q(oof[y[tr] == 0])
     ben = tr[y[tr] == 0]
     fi, ci = next(GroupShuffleSplit(1, test_size=0.2, random_state=rx.SEED).split(ben, groups=run[ben]))
     sc = StandardScaler().fit(X[ben[fi]])
     lof = LocalOutlierFactor(n_neighbors=20, novelty=True).fit(sc.transform(X[ben[fi]]))
     thr_lof = q(-lof.score_samples(sc.transform(X[ben[ci]])))
-    p = rf.predict_proba(X[te])[:, 1]
+    p = proba(rf, X[te])
     s_lof = -lof.score_samples(sc.transform(X[te]))
     yt = y[te]
     rows = []
