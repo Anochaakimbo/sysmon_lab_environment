@@ -17,6 +17,7 @@ import csv
 import glob
 import io
 import json
+import re
 import os
 import subprocess
 import sys
@@ -113,7 +114,7 @@ def _spawn(script, *args):
                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 
 
-def start_collectors(session, platform="linux"):
+def start_collectors(session, platform="linux", receiver=False):
     """เปิด collector ที่จำเป็นตามแพลตฟอร์ม
 
     log_receiver = ท่อ syslog ของ Linux เท่านั้น
@@ -124,7 +125,7 @@ def start_collectors(session, platform="linux"):
       botnet_win beacon ไป :8080/:4444 และ miner_win ต่อ pool :3333
       mining_pool ต้อง start ก่อนเพื่อยึด 3333"""
     stop_collectors()
-    if platform == "linux":
+    if platform == "linux" or receiver:     # receiver=True: Windows live demo (stream_sysmon.ps1 -> 5514)
         COLLECTORS["receiver"] = _spawn("log_receiver.py", "--session", session)
     COLLECTORS["pool"] = _spawn("mining_pool.py")      # :3333 stratum
     time.sleep(0.5)
@@ -275,6 +276,112 @@ def dataset_stats():
     return out
 
 
+# ---------------------------------------------------------- live demo (Windows)
+# The 6 steps tested by hand on 9 Oct 2026: restore clean -> boot -> start the Sysmon forwarder
+# in the VM (SYSTEM task, WinRM kills its own children) -> log_receiver + live_detector --follow
+# -> run the scenario once -> stop forwarder, halt. Alerts land in LIVE_ALERTS for the web panel.
+LIVE_ALERTS = LOG_DIR / "alerts_live.jsonl"
+LIVE_MODEL = LAB_DIR / "models" / "live_rf.joblib"
+FORWARDER_START = ('schtasks /create /tn LabSysmonStream /sc once /st 00:00 /ru SYSTEM /f /tr '
+                   '"powershell -ExecutionPolicy Bypass -File C:\\vagrant\\scenarios_win\\stream_sysmon.ps1"; '
+                   'schtasks /run /tn LabSysmonStream')
+FORWARDER_STOP = "schtasks /end /tn LabSysmonStream; schtasks /delete /tn LabSysmonStream /f"
+
+
+def _pipe_to_log(proc, tag):
+    for ln in proc.stdout:
+        ln = re.sub(r"\x1b\[[0-9;]*m", "", ln).rstrip()     # live_detector colours its alerts for terminals
+        if ln.strip():
+            logline(f"[{tag}] {ln}")
+
+
+def run_live_demo(name):
+    entry = REGISTRY.get(name)
+    STATE.update(job=f"live:{name}", phase="running", started=datetime.now().isoformat())
+    session = f"live_{name}_{datetime.now():%H%M%S}"
+    det, ok = None, False
+    ls = _LogStream()
+    try:
+        with redirect_stdout(ls), redirect_stderr(ls):
+            if not entry or entry["platform"] != "windows":
+                raise RuntimeError(f"live demo รองรับเฉพาะ scenario ฝั่ง Windows ('{name}')")
+            if not LIVE_MODEL.exists():
+                raise RuntimeError(f"ไม่มีโมเดล {LIVE_MODEL} - รัน python host/live_detector.py --train ก่อน")
+            LIVE_ALERTS.write_text("", encoding="utf-8")       # fresh alerts panel
+            start_collectors(session, "windows", receiver=True)
+            print("[live 1/6] restore clean snapshot + boot wintarget")
+            orch_win.snapshot_restore()
+            orch_win.vm_up()
+            time.sleep(8)
+            print("[live 2/6] start Sysmon forwarder in the VM")
+            orch_win.winrm(FORWARDER_START, timeout=120)
+            log = None
+            for _ in range(60):
+                found = sorted(LOG_DIR.glob(f"{session}_*.log"))
+                if found:
+                    log = found[-1]
+                    break
+                time.sleep(2)
+            if log is None:
+                raise RuntimeError("ไม่มี event จาก forwarder ใน 120 วินาที - ดู C:\\lab_stream_error.txt ใน VM")
+            print(f"[live 3/6] events arriving -> {log.name}; start live_detector")
+            env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+            det = subprocess.Popen([sys.executable, str(HOST_DIR / "live_detector.py"), "--follow", str(log),
+                                    "--platform", "windows", "--out", str(LIVE_ALERTS)],
+                                   cwd=str(HOST_DIR), env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, encoding="utf-8", errors="replace")
+            threading.Thread(target=_pipe_to_log, args=(det, "detector"), daemon=True).start()
+            # 9 Oct 2026: Smart App Control blocked a scipy .pyd -> detector died at import, demo still said "ok"
+            # wait for the detector's own "[live] ..." banner = imports + model load succeeded
+            for _ in range(60):
+                if det.poll() is not None or any(l.split("  ", 1)[-1].startswith("[detector] [live]")
+                                                 for l in STATE["log"][-50:]):
+                    break
+                time.sleep(1)
+            if det.poll() is not None:
+                raise RuntimeError(f"live_detector ตายตั้งแต่เริ่ม (exit {det.returncode}) - ดู [detector] ใน log "
+                                   "(เคยเจอ Smart App Control บล็อก DLL ของ scipy)")
+            print(f"[live 4/6] run {name} once")
+            script = entry["spec"]["script"]
+            orch_win.winrm('powershell -Command "New-Item -ItemType Directory -Path C:\\lab_sandbox -Force | Out-Null; '
+                           'Copy-Item C:\\vagrant\\scenarios_win\\_lib.ps1 C:\\lab_sandbox\\ -Force; '
+                           f'Copy-Item C:\\vagrant\\scenarios_win\\{script} C:\\lab_sandbox\\ -Force"', timeout=180)
+            orch_win.winrm_ps1(f"C:\\lab_sandbox\\{script}", timeout=2400)
+            print("[live 5/6] scenario done - wait 60 s for the last events")
+            time.sleep(60)
+            if det.poll() is not None:
+                raise RuntimeError(f"live_detector หยุดกลางทาง (exit {det.returncode}) - alert ไม่ครบ")
+            ok = True
+    except Exception as e:  # noqa
+        logline(f"[live] '{name}' ล้ม: {e}")
+    finally:
+        if det and det.poll() is None:
+            det.terminate()
+        with redirect_stdout(ls), redirect_stderr(ls):
+            print("[live 6/6] stop forwarder + halt VM")
+            for step in (lambda: orch_win.winrm(FORWARDER_STOP, timeout=60), orch_win.vm_halt):
+                try:
+                    step()
+                except Exception as e:  # noqa - keep going, the VM must still be halted
+                    logline(f"[live] !! {e}")
+        stop_collectors()
+        STATE.update(job=None, phase="done" if ok else "error")
+        logline(f"[live] จบ live demo '{name}' ({'ok' if ok else 'error'})")
+
+
+def read_alerts(limit=30):
+    if not LIVE_ALERTS.exists():
+        return []
+    rows = []
+    for ln in LIVE_ALERTS.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(ln))
+        except ValueError:
+            pass        # a half-written last line while the detector is appending
+    return rows[-limit:][::-1]
+
+
 def busy():
     return STATE["phase"] == "running"
 
@@ -309,6 +416,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(sc))
         if self.path == "/api/dataset":
             return self._send(200, json.dumps(dataset_stats()))
+        if self.path == "/api/alerts":
+            return self._send(200, json.dumps(read_alerts()))
         return self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
@@ -329,6 +438,14 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=run_worker, args=(names, dur, at),
                              daemon=True).start()
             return self._send(200, json.dumps({"ok": True, "started": names}))
+        if self.path == "/api/live_demo":
+            if busy():
+                return self._send(409, json.dumps({"error": "มี job รันอยู่"}))
+            name = body.get("scenario")
+            if REGISTRY.get(name, {}).get("platform") != "windows":
+                return self._send(400, json.dumps({"error": "live demo รองรับเฉพาะ scenario ฝั่ง Windows"}))
+            threading.Thread(target=run_live_demo, args=(name,), daemon=True).start()
+            return self._send(200, json.dumps({"ok": True, "started": name}))
         if self.path == "/api/merge":
             if busy():
                 return self._send(409, json.dumps({"error": "มี job รันอยู่"}))
@@ -506,6 +623,20 @@ tbody tr:last-child td{border-bottom:none}
       <button onclick="merge()" id="mergebtn" class="full">🔀 Merge dataset (สะอาด)</button>
     </div>
   </div>
+  <div class="panel">
+    <h2>Live demo — Windows</h2>
+    <div style="color:var(--mut);font-size:12px;line-height:1.6;margin-bottom:10px">
+      revert snapshot → boot → ส่ง Sysmon สดจาก VM → live_detector → รัน scenario 1 รอบ → halt
+      &nbsp;·&nbsp; ใช้ models/live_rf.joblib (ถ้าจะทดสอบแบบไม่โกง ให้เทรนโดย --exclude-run scenario นั้น)</div>
+    <div class="ctl">
+      <select id="livesc" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-family:inherit"></select>
+      <button class="run" id="livebtn" onclick="liveDemo()">▶ Live demo</button>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Alerts <small id="alertcount" style="color:var(--mut);font-weight:400"></small></h2>
+    <div id="alerts" style="max-height:340px;overflow-y:auto"></div>
+  </div>
   <div class="panel full">
     <h2>Log สด</h2>
     <div id="log"></div>
@@ -608,7 +739,27 @@ async function confirmRun(){
   pick(null);                      // ล้างการเลือกโดยไม่แตะ checkbox
   await run(name)}
 
-async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT)}
+async function loadSc(){scenarios=await j('/api/scenarios');setPlat(PLAT);
+  $('#livesc').innerHTML=scenarios.filter(s=>s.platform==='windows')
+    .map(s=>`<option ${s.name==='trojan_win'?'selected':''}>${s.name}</option>`).join('')}
+async function liveDemo(){const n=$('#livesc').value;
+  if(!confirm(`Live demo: ${n}\nrevert + boot wintarget แล้วรัน 1 รอบ (~10-15 นาที)`))return;
+  const r=await j('/api/live_demo','POST',{scenario:n}); if(r.error)alert(r.error)}
+const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function loadAlerts(){
+  const al=await j('/api/alerts');
+  $('#alertcount').textContent=al.length?`(${al.length})`:'';
+  $('#alerts').innerHTML=al.length?al.map(a=>`
+    <div style="border:1px solid var(--border);border-left:4px solid var(--bad);border-radius:9px;padding:10px 12px;margin-bottom:9px">
+      <div style="font-weight:600">#${a.alert} &nbsp;${esc(a.time).slice(0,19)} UTC
+        <span style="color:var(--mut);font-weight:400;font-size:12px">· ${esc(a.rule)}</span></div>
+      ${(a.processes||[]).slice(0,4).map(p=>`
+        <div style="font-size:12px;margin-top:7px">
+          <b style="color:var(--bad)">${(+p.score).toFixed(2)}</b>
+          <code style="font-size:11.5px">${esc(p.cmd).slice(0,140)}</code>
+          ${p.evidence?`<div style="color:var(--warn)">evidence: ${esc(p.evidence).slice(0,120)}</div>`:''}
+          <div style="color:var(--mut)">lineage: ${esc(p.lineage)}</div></div>`).join('')}
+    </div>`).join(''):'<div style="color:var(--mut)">ยังไม่มี alert</div>'}
 function selected(){return[...document.querySelectorAll('.scchk:checked')].map(c=>c.value)}
 function selectSet(set){document.querySelectorAll('.scchk').forEach(c=>c.checked=set.includes(c.value))}
 async function run(name){await j('/api/run','POST',
@@ -624,7 +775,8 @@ async function tick(){
   const busy=st.busy;
   $('#jobstate').textContent=busy?`▶ ${st.job||'...'} (${st.phase})`:st.phase;
   $('#jobstate').style.borderColor=busy?'var(--warn)':(st.phase=='error'?'var(--bad)':'var(--border)');
-  document.querySelectorAll('#scbtns button,#mergebtn,#snapbtn,#batchbtn').forEach(b=>b.disabled=busy);
+  document.querySelectorAll('#scbtns button,#mergebtn,#snapbtn,#batchbtn,#livebtn').forEach(b=>b.disabled=busy);
+  loadAlerts();
   const q=$('#queue');
   if((st.done&&st.done.length)||(st.queue&&st.queue.length)){
     const done=(st.done||[]).map(d=>`${d.ok?'✅':'❌'} ${d.name}`).join('  ');
