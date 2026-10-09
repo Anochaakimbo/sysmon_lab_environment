@@ -83,7 +83,102 @@ def harness_mask(img, cmd, pcmd):
             | (pcmd.str.contains(r"Invoke-AtomicRedTeam|-Version 5\.1 -s -NoLogo", case=False) & ~base.isin(SHELLS)))
 
 
-def prefix_features(raw):
+# ---- behaviour features (--behavior) -----------------------------------------------------
+# What the process does, not how long its command is: sensitive paths, file churn, outbound
+# traffic, children, command-line structure. No label, lineage or lab path is used.
+SENSITIVE = re.compile(r"/etc/(passwd|shadow|sudoers|crontab|cron\.|systemd/)|/\.ssh/|/\.(bashrc|profile|bash_profile)\b"
+                       r"|/var/spool/cron|lsass|\\SAM\b|\\CurrentVersion\\Run|\\Startup\\|\\Tasks\\"
+                       r"|\\Winlogon\\|\\Image File Execution Options\\", re.I)
+WRITABLE = re.compile(r"^(/tmp/|/var/tmp/|/dev/shm/)|\\(Temp|AppData|Downloads)\\", re.I)
+PRIVATE = re.compile(r"^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1|fe80:|0\.0\.0\.0)")
+B64 = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
+
+
+def _entropy(s):
+    if not s:
+        return 0.0
+    _, c = np.unique(list(s), return_counts=True)
+    p = c / c.sum()
+    return float(-(p * np.log2(p)).sum())
+
+
+def behavior_rows(df, key, ts):
+    """per-event indicators, computed once on the full log."""
+    tf = df.TargetFilename.fillna("").astype(str)
+    fc = (df.EventID == 11) & (tf != "")
+    base = tf.str.split(r"[\\/]").str[-1]
+    r = pd.DataFrame(dict(_k=key.values, _ts=ts.values, eid=df.EventID.values), index=df.index)
+    r["sens"] = (tf.str.contains(SENSITIVE) | df.TargetObject.fillna("").astype(str).str.contains(SENSITIVE)).astype(int)
+    r["fname_ent"] = np.where(fc, base.map(_entropy), np.nan)
+    r["ext"] = np.where(fc, base.str.extract(r"\.([A-Za-z0-9]{1,8})$", expand=False).str.lower(), None)
+    r["tf"] = np.where(df.EventID.isin([11, 23]) & (tf != ""), tf.str.lower(), None)
+    ip = df.DestinationIp.fillna("").astype(str)
+    r["ext_conn"] = ((df.EventID == 3) & (ip != "") & ~ip.str.contains(PRIVATE)).astype(int)
+    pg = df.ParentProcessGuid.astype("string")
+    r["_pk"] = np.where((df.EventID == 1) & pg.notna() & (pg != rx.NULL_GUID),
+                        df.platform + "|" + df.run_id + "|" + pg.fillna(""), None)
+    return r
+
+
+def behavior_static(meta, img, cmd):
+    """per-process features fixed at ProcessCreate (command line + image path)."""
+    c = cmd.fillna("").astype(str)
+    return pd.DataFrame({
+        "b_pipes": c.str.count(r"\|"), "b_redirects": c.str.count(r"\d?>>?"),
+        "b_chain": c.str.count(r"&&|;|\s&\s"), "b_url": c.str.contains(r"https?://|ftp://", case=False).astype(int),
+        "b_ip_literal": c.str.contains(r"\b\d{1,3}(\.\d{1,3}){3}\b").astype(int),
+        "b_b64": c.str.contains(B64).astype(int), "b_devtcp": c.str.contains(r"/dev/(tcp|udp)/").astype(int),
+        "b_cmd_entropy": c.map(_entropy),
+        "b_exec_writable": img.fillna("").astype(str).str.contains(WRITABLE).astype(int),
+    }, index=meta.index)
+
+
+def behavior_at(r, start, a, index):
+    """aggregate per-event indicators over the first `a` seconds of each process."""
+    age = (r._ts - r._k.map(start)).dt.total_seconds()
+    x = r[age <= a]
+    g = x.groupby("_k")
+    f = pd.DataFrame(index=index)
+    f["b_sensitive"] = g.sens.sum()
+    f["b_fname_ent_mean"] = g.fname_ent.mean()
+    f["b_fname_ent_max"] = g.fname_ent.max()
+    f["b_n_ext"] = g.ext.nunique()
+    f["b_ext_conn"] = g.ext_conn.sum()
+    cr = x[x.eid == 11].dropna(subset=["tf"]).groupby(["_k", "tf"]).size()
+    de = x[x.eid == 23].dropna(subset=["tf"]).groupby(["_k", "tf"]).size()
+    both = cr.index.intersection(de.index)
+    f["b_create_then_delete"] = pd.Series(1, index=both).groupby(level=0).sum() if len(both) else 0
+    # children spawned within `a` seconds of this process's own start
+    ch = r[r._pk.notna()]
+    ch_age = (ch._ts - ch._pk.map(start)).dt.total_seconds()
+    f["b_children"] = ch[ch_age <= a].groupby("_pk").size()
+    return f.reindex(index).fillna(0)
+
+
+def behavior_parent(meta, img, a):
+    """siblings: what this process's parent had spawned by (own start + a).
+    Linux scenarios spread one behaviour over many tiny processes (one openssl + one rm per file),
+    so the per-process view misses it; the parent's spawn burst does not."""
+    m = pd.DataFrame(dict(pk=meta.pkey.values, s=meta.start.values,
+                          img=img.fillna("").astype(str).str.split(r"[\\/]").str[-1].str.lower().values), index=meta.index)
+    m = m[m.pk.notna()]
+    out = pd.DataFrame(0.0, index=meta.index, columns=["b_sib_spawned", "b_sib_same_image", "b_sib_images"])
+    for _, g in m.groupby("pk"):
+        g = g.sort_values("s")
+        t = g.s.values
+        lim = t + np.timedelta64(int(min(a, 1e7) * 1000), "ms")
+        out.loc[g.index, "b_sib_spawned"] = np.searchsorted(t, lim, side="right")
+        same = np.zeros(len(g))
+        for _, gi in g.groupby("img"):
+            pos = g.index.get_indexer(gi.index)
+            same[pos] = np.searchsorted(gi.s.values, lim[pos], side="right")
+        out.loc[g.index, "b_sib_same_image"] = same
+        imgs = g.img.values
+        out.loc[g.index, "b_sib_images"] = [len(set(imgs[:n])) for n in np.searchsorted(t, lim, side="right")]
+    return out
+
+
+def prefix_features(raw, behavior=False):
     """features of every process cut at each age; index = composite key."""
     df = raw[raw.ProcessGuid.notna() & (raw.ProcessGuid != rx.NULL_GUID)].copy()
     ts = pd.to_datetime(df.UtcTime, errors="coerce")
@@ -104,11 +199,18 @@ def prefix_features(raw):
     meta["run_hours"] = meta.run.map((run_span["max"] - run_span["min"]).dt.total_seconds() / 3600)
     for a in AGES:   # same rows, same order at every age
         feats[a] = feats[a].reindex(meta.index).fillna(0)
+    if behavior:
+        r = behavior_rows(df, key, ts)
+        st = behavior_static(meta, first("Image"), first("CommandLine"))
+        for a in AGES:
+            feats[a] = pd.concat([feats[a], behavior_at(r, meta.start, a, meta.index), st,
+                                  behavior_parent(meta, first("Image"), a)], axis=1)
+        print("  + %d behaviour features" % (feats[np.inf].shape[1] - 32), flush=True)
     return feats, meta
 
 
-def load_features(raw, no_harness=False):
-    feats, meta = prefix_features(raw)
+def load_features(raw, no_harness=False, behavior=False):
+    feats, meta = prefix_features(raw, behavior)
     h = meta.harness.values
     print("harness processes: %d of %d (label 1: %d, label 0: %d)%s"
           % (h.sum(), len(h), (h & (meta.label == 1)).sum(), (h & (meta.label == 0)).sum(),
@@ -233,6 +335,12 @@ def _selftest():
                  r'"powershell.exe" & {Compress-Archive -Path C:\x -DestinationPath $env:TEMP\a.zip}')
     assert not H("/usr/bin/sh", "sh -c whoami", "pwsh -NoProfile -Command Import-Module Invoke-AtomicRedTeam")
     assert not H("/usr/bin/openssl", "openssl enc -aes-256-cbc -in /tmp/lab_sandbox/victim_files/a.txt")
+    mm = pd.DataFrame(dict(pkey=["p", "p", "p", None], start=[t0 + pd.Timedelta(seconds=s) for s in (0, 1, 50, 0)]),
+                      index=["a", "b", "c", "d"])
+    bp = behavior_parent(mm, pd.Series(["/bin/rm", "/bin/rm", "/bin/ls", "/bin/x"], index=mm.index), 5)
+    assert bp.b_sib_spawned.tolist() == [2, 2, 3, 0], bp
+    assert bp.b_sib_same_image.tolist() == [2, 2, 1, 0] and bp.b_sib_images.tolist() == [1, 1, 2, 0], bp
+    assert _entropy("aaaa") == 0.0 and abs(_entropy("ab") - 1.0) < 1e-9
     print("selftest ok")
 
 
@@ -247,6 +355,7 @@ def main():
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--no-harness", action="store_true",
                     help="drop lab-harness processes (ART engine, launchers, helpers) from training and test")
+    ap.add_argument("--behavior", action="store_true", help="add the b_* behaviour features to the 32 paper features")
     ap.add_argument("--benign-curve", action="store_true",
                     help="only the false-alarm learning curve over the number of benign runs")
     a = ap.parse_args()
@@ -257,7 +366,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if a.benign_curve:
         raw, _ = rx.load()
-        feats, meta = load_features(raw, a.no_harness)
+        feats, meta = load_features(raw, a.no_harness, a.behavior)
         c = benign_curve(feats, meta)
         c.to_csv(os.path.join(OUT, "benign_curve.csv"), index=False)
         s = c.groupby("benign_runs_in_train")[["process_fpr", "process_fpr_age0", "fa_per_hour"]].agg(["mean", "std"])
@@ -268,7 +377,7 @@ def main():
     RF_THR = a.thr
     sfx = a.tag or "_k%d_thr%g" % (a.k, a.thr)
     raw, _ = rx.load()
-    feats, meta = load_features(raw, a.no_harness)
+    feats, meta = load_features(raw, a.no_harness, a.behavior)
     y, groups = meta.label.values, meta.lineage.values
 
     by_age, incidents, fas, hosts = [], [], [], []
