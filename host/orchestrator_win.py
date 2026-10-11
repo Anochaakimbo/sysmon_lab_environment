@@ -291,13 +291,13 @@ def run_scenario(name, duration_min=5, repeat=True):
     meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"[6/6] metadata -> {meta_file}")
 
-    if raw_xml:
-        try:
-            run_pipeline_win(raw_xml, name, spec)
-        except subprocess.CalledProcessError as e:
-            print(f"[!] pipeline ล้ม: {e}")
-    else:
-        print("[!] ไม่พบ XML - export ทำงานไหม? shared folder sync ไหม?")
+    if not raw_xml:
+        # 12 ต.ค. 2026: export ได้ 0 event ทั้ง 6 run (บั๊ก timezone) แต่ run ยังรายงานสำเร็จ -> ต้องล้มให้เห็น
+        raise RuntimeError("ไม่พบ XML - export ได้ 0 event? shared folder sync ไหม? (run นี้ไม่มี dataset)")
+    try:
+        run_pipeline_win(raw_xml, name, spec)
+    except subprocess.CalledProcessError as e:
+        print(f"[!] pipeline ล้ม: {e}")
 
 
 def main():

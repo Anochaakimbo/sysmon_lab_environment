@@ -17,9 +17,9 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Forc
 
 # กรอง event ตั้งแต่ StartUtc (ถ้าระบุ) ไม่งั้นเอา 30 นาทีล่าสุด
 if ($StartUtc) {
-    $start = [datetime]::Parse($StartUtc).ToUniversalTime()
+    $start = [datetime]::Parse($StartUtc).ToLocalTime()   # FilterHashtable StartTime = local time; Kind=Utc shifted the window by the VM's UTC offset (Win11 box = Pacific, 0 events)
 } else {
-    $start = (Get-Date).ToUniversalTime().AddMinutes(-30)
+    $start = (Get-Date).AddMinutes(-30)
 }
 
 Write-Host "[export] Sysmon events ตั้งแต่ $($start.ToString('o'))"
