@@ -1,0 +1,17 @@
+ตัวอย่างงานวิจัย SAP / ACSAC 2023
+อัปโหลด sap_research_model_web.pkl คู่กับ research_demo_200.csv
+เลือกโหมดฟีเจอร์ที่เตรียมแล้ว และคอลัมน์ label ตามค่าเริ่มต้น
+ตัวอย่างนี้ต้องติดตั้ง requirements_research.txt เพิ่มด้วย
+
+ต้นทาง: https://github.com/SAP-archive/cross-language-detection-artifacts
+บทความ: https://doi.org/10.1145/3627106.3627138
+รุ่นต้นทางอยู่ใน upstream_commit.txt และสิทธิ์ใช้งานใน LICENSE
+โมเดลเดิมถูกแปลงจาก XGBoost 1.6.1 เป็น 3.1.2 ผ่าน native JSON ไม่ได้ฝึกใหม่
+ตรวจเทียบ 1,940 แถวแล้ว ผลทำนายและ probability ตรงกันทั้งหมด
+CSV 200 แถวนี้มาจากข้อมูลที่ใช้ฝึก จึงเป็นการทดสอบการทำงานของเว็บ ไม่ใช่ independent evaluation
+ผลควรได้ Accuracy 0.895, F1 0.8852459016 และ confusion matrix [[98,2],[19,81]]
+โมเดลตรวจแพ็กเกจ npm/PyPI ไม่ใช่ข้อมูล Sysmon
+
+เอกสารต้นฉบับ สคริปต์แปลง และไลบรารีรุ่นเก่ายังคงอยู่ใน
+NCCY/work_revision/model_web/research_example
+ไม่จำเป็นต้องใช้โฟลเดอร์นั้นในการอัปโหลดตัวอย่างที่เตรียมไว้แล้ว

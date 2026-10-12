@@ -1,0 +1,2 @@
+# Optional dependency for the prepared SAP ACSAC 2023 research example.
+xgboost==3.1.2

@@ -1,0 +1,72 @@
+{
+  "filename": "research_demo_200.csv",
+  "model": "XGBClassifier",
+  "model_file": "sap_research_model_web.pkl",
+  "model_sha256": "33ab9fa5130bdf67b38fbf31cfe9788a4d1546b4ba1190a96fb2c2089effe520",
+  "input_mode": "features",
+  "score_kind": "probability",
+  "threshold": null,
+  "events": 200,
+  "dropped_events": 0,
+  "processes": 200,
+  "flagged": 83,
+  "labeled": 200,
+  "overlap": null,
+  "notes": [
+    "ไฟล์ไม่มี Pipeline/scaler: CSV ต้องเตรียมข้อมูลเหมือนตอนฝึก หากเคย scale/PCA ให้บันทึกขั้นตอนนั้นรวมใน Pipeline",
+    "ไม่มีหลักฐานชุดฝึกที่ตรวจสอบได้สำหรับโมเดลที่อัปโหลด จึงยังยืนยันไม่ได้ว่าข้อมูลทดสอบเป็นอิสระ",
+    "หนึ่งแถวใน CSV เป็นหนึ่งตัวอย่างทดสอบ ใช้เฉพาะฟีเจอร์ที่โมเดลต้องการตามลำดับ"
+  ],
+  "metrics": {
+    "Accuracy": 0.895,
+    "Precision": 0.9759036144578314,
+    "Recall": 0.81,
+    "F1": 0.8852459016393442,
+    "FPR": 0.02,
+    "AUC": 0.9953,
+    "n_labeled": 200,
+    "confusion": [
+      [
+        98,
+        2
+      ],
+      [
+        19,
+        81
+      ]
+    ]
+  },
+  "by_os": {
+    "unknown": {
+      "processes": 200,
+      "flagged": 83,
+      "metrics": {
+        "Accuracy": 0.895,
+        "Precision": 0.9759036144578314,
+        "Recall": 0.81,
+        "F1": 0.8852459016393442,
+        "FPR": 0.02,
+        "AUC": 0.9953,
+        "n_labeled": 200,
+        "confusion": [
+          [
+            98,
+            2
+          ],
+          [
+            19,
+            81
+          ]
+        ]
+      }
+    }
+  },
+  "migration_check": {
+    "all_published_rows": 1940,
+    "identical_classes": true,
+    "max_probability_difference": 0.0,
+    "legacy_xgboost": "1.6.1",
+    "web_xgboost": "3.1.2"
+  },
+  "research_scope": "Integration check only; sampled CSV is not independent of training."
+}
