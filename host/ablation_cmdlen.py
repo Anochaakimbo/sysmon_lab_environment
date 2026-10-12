@@ -1,5 +1,5 @@
 """ablation_cmdlen.py - RF with all 32 features vs without cmd_len/pcmd_len (paper section 5).
-usage: python host/ablation_cmdlen.py [dataset_dir]
+usage: python host/ablation_cmdlen.py [dataset_dir] [output_dir]
 """
 import numpy as np, pandas as pd, json
 import revised_experiments as R
@@ -8,6 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score, roc_auc_score
 import os, sys
 if len(sys.argv) > 1: R.DATA = sys.argv[1]   # default: host/dataset (see REPRODUCE.md)
+if len(sys.argv) > 2: R.OUT = sys.argv[2]    # default: reference/revised_results
 raw,extra=R.load()
 f,m,_=R.aggregate(raw)
 y=m.label.values; g=m.lineage.values
