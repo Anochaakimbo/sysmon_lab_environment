@@ -25,6 +25,7 @@ The dataset is in the repository, no VM is needed:
 |---|---|
 | `FINAL_DATASET.csv` | the 81,331 events / 80 columns of the paper (12 runs) |
 | `data/new_runs/*_labeled.csv` | the 2 independent Linux runs of Table 4 ("รอบทดลองใหม่") |
+| `data/machine2/*_labeled.csv.gz` | post-review second machine per OS (Ubuntu 24.04, Windows 11), 12 runs |
 
 The scripts read them from `host/dataset/`:
 
@@ -48,6 +49,7 @@ To rebuild the CSVs from the raw Sysmon logs instead, see `host/rebuild_dataset.
 | Section 4.1 composite key / random process split | same | `key_impact.csv`, `rf_random_process_split.csv` |
 | Section 5 ablation without `cmd_len`, `pcmd_len` | `python host/ablation_cmdlen.py` | `reference/revised_results/ablation_cmdlen.json` |
 | Cross-platform transfer (train one OS, test the other) | `python host/cross_platform_eval.py --merged merged_dataset.csv` | `reference/cross_platform/` |
+| Post-review leave-one-machine-out | `python host/machine_eval.py` (reads `FINAL_DATASET.csv` + `data/machine2/` directly) | `reference/machine_eval/` |
 
 `revised_experiments.py` takes optional `[dataset_dir] [output_dir]` arguments; it caches finished
 protocols as CSV in the output directory, so delete that directory to recompute everything (~5 min on 16 cores).
