@@ -524,6 +524,7 @@ sysmon config ที่กรอง CreateKey + OS housekeeping, `c2_server.py` 
 แก้แล้ว: เพิ่ม repeat loop + `--no-repeat` ไว้ย้อนพฤติกรรมเดิม
 พิมพ์ `รวม N รอบ` ทุกครั้งเพื่อให้เห็นว่าวนจริงกี่รอบ
 → `benign_win` เพิ่มเป็น **9,293 แถว (18 รอบ)** และ label balance เหลือต่างกัน **0.5 จุด**
+(⚠️ ตัวเลข 0.5 จุดมาจาก parser ที่มีบั๊ก ดูหัวข้อ "บั๊ก parser Windows" ด้านล่าง ของจริงต่างกัน 17.7 จุด)
 
 ### 🚨 GUIBLOCK — atomic test ที่เปิดหน้าต่างแล้วรอผู้ใช้
 
@@ -567,10 +568,31 @@ sysmon config ที่กรอง CreateKey + OS housekeeping, `c2_server.py` 
 | | ก่อน | หลัง |
 |---|------|------|
 | Linux malicious | 34.3% | 34.3% |
-| Windows malicious | 67.8% | **33.8%** |
-| ต่างกัน | 33.5 จุด | **0.5 จุด** |
+| Windows malicious | 67.8% | **33.8%** (parser มีบั๊ก ของจริง 51.9%) |
+| ต่างกัน | 33.5 จุด | **0.5 จุด** (ของจริง 17.7 จุด) |
 
 แก้ด้วยการเก็บ `benign_win` + repeat loop ไม่ต้องแตะโมเดลเลย
+
+### 🚨 บั๊ก parser Windows — สัดส่วน label ที่ "สมดุล" ข้างบนผิด (เจอ 12 ต.ค. 2026)
+
+`parse_sysmon.py` อ่าน export ของ Windows ทีละบรรทัด event ที่ `CommandLine` มีขึ้นบรรทัดใหม่
+(105 ProcessCreate ใน dataset เปเปอร์) ถูกตัดกลาง field ที่ตามหลังหายหมด รวม `ParentProcessGuid`
+→ สายโปรเซสขาด ลูกหลานได้ label 0 ไม่มี error ใดๆ (silent failure อีกตัว)
+
+แก้แล้วใน commit `cf67f85`: `records()` ต่อบรรทัดจนเจอ `</Event>`
+
+| ระดับ event (dataset เปเปอร์) | parser เดิม | parser แก้แล้ว |
+|---|---|---|
+| Linux malicious | 34.2% | 34.2% |
+| Windows malicious | 33.3% | **51.9%** |
+| ต่างกัน | 0.9 จุด | **17.7 จุด** |
+| รวม | 33.8% | 42.1% |
+
+→ **สองแพลตฟอร์มไม่ได้สมดุล label แล้ว** การฝึกร่วมสอง OS มีสัดส่วนคลาสต่างกันตาม OS
+dataset ฉบับแก้: `data/FINAL_DATASET_fixed.csv.gz` (`FINAL_DATASET.csv` = ฉบับส่งพิจารณา เก็บไว้เทียบ)
+ตาราง camera-ready ทุกตารางคำนวณใหม่บนฉบับแก้แล้ว ข้อสรุปเปเปอร์ไม่เปลี่ยน (ดู `REPRODUCE.md`)
+
+ตรวจเร็วๆ ว่า CSV ฝั่ง Windows ไม่โดนบั๊กนี้: ProcessCreate ที่ `ParentProcessGuid` ว่าง ต้องเป็น 0 แถว
 
 ### ❌ ยังแก้ไม่ได้ — โมเดลแยก platform ได้ 100%
 
@@ -1128,7 +1150,7 @@ Decision Tree กับ Random Forest ให้ค่า **ตรงกัน 16
 3. **เพิ่มเครื่อง** (`computer` มีแค่ 2 ค่า)
 
 ไม่ช่วย: เพิ่ม event จาก session เดิม, เก็บ malware เพิ่มโดยไม่เพิ่ม benign
-(สัดส่วน label ตอนนี้ต่างกันแค่ 0.5 จุด สมดุลดีแล้ว)
+(⚠️ เดิมเขียนว่าสัดส่วน label ต่างกันแค่ 0.5 จุด — ผิด เพราะบั๊ก parser จริงๆ ต่างกัน 17.7 จุด ดูหัวข้อ "บั๊ก parser Windows")
 
 ---
 

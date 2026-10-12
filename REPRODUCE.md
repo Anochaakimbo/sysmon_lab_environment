@@ -66,6 +66,8 @@ protocols as CSV in the output directory, so delete that directory to recompute 
 `data/FINAL_DATASET_fixed.csv.gz`, so the only difference from the submitted tables is the corrected Windows labels.
 `ablation_cmdlen.py`, `feature_importance.py` and `cross_platform_eval.py` come from `main`.
 Running `fa377a0` twice in the environment above gives the same results (differences below 1e-15).
+The other scripts rerun identically except `cross_platform_eval.py`, whose per-fold ROC-AUC can differ by
+up to 2e-7 (Random Forest probability ties); the summary to 3 decimals is unchanged.
 
 | Table | Model | Submitted | Camera-ready |
 |---|---|---|---|
