@@ -28,6 +28,7 @@ The dataset is in the repository, no VM is needed:
 | `data/new_runs/*_labeled.csv` | the 2 independent Linux runs of Table 4 ("รอบทดลองใหม่") |
 | `data/machine2/*_labeled.csv.gz` | post-review second machine per OS (Ubuntu 24.04, Windows 11), 12 runs |
 | `data/machine1_win_fixed/*_labeled.csv.gz` | the 6 Windows runs of `FINAL_DATASET_fixed` per run; used by `machine_eval.py` |
+| `data/repeat/*_labeled.csv.gz` | post-review repetitions 1 and 2 of every scenario on machine 1 (same VMs as the paper), 24 runs |
 
 The scripts read them from `host/dataset/`:
 
@@ -54,6 +55,7 @@ To rebuild the CSVs from the raw Sysmon logs instead, see `host/rebuild_dataset.
 | Table 6 feature importance (impurity + permutation) | `python host/feature_importance.py` | `reference/revised_results/feature_importance.csv` |
 | Cross-platform transfer (train one OS, test the other) | `python host/cross_platform_eval.py --merged merged_dataset.csv` | `reference/cross_platform/` |
 | Post-review leave-one-machine-out | `python host/machine_eval.py` (reads `FINAL_DATASET.csv`, `data/machine1_win_fixed/`, `data/machine2/`) | `reference/machine_eval/` |
+| Post-review leave-one-repetition-out | `python host/repeat_eval.py` (reads the same files as `machine_eval.py` plus `data/repeat/`) | `reference/repeat_eval/` |
 
 `revised_experiments.py` takes optional `[dataset_dir] [output_dir]` arguments; it caches finished
 protocols as CSV in the output directory, so delete that directory to recompute everything (~5 min on 16 cores).
