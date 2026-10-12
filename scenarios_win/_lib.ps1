@@ -81,12 +81,26 @@ Defender จะบล็อก atomic test ที่โหลดไฟล์แ�
     throw $msg
 }
 
+# 12 ต.ค. 2026 (Windows 11): T1105-17 ทิ้ง IMEWDBLD.exe ค้างไว้ (parent ตายแล้ว) และ test ที่โดน
+# timeout ทิ้ง process ลูกไว้ -> ถือ handle ของ winrm ไว้ winrm ไม่คืนค่าจนโดนตัด 2400s (miner/botnet ได้ 1 รอบ)
+# ฆ่า process ที่เกิดระหว่าง atomic แล้ว parent ตายไปแล้ว (orphan) - ของ OS มี parent ยังอยู่ ไม่โดน
+# shortcut: parent PID ที่ถูก reuse ไปแล้วจะดูเหมือนยังมีชีวิต (ไม่ถูกฆ่า) - ยังไม่เคยเจอ
+function Stop-Orphans { param([datetime]$Since)
+    $all = @(Get-CimInstance Win32_Process)
+    $ids = $all | ForEach-Object ProcessId
+    $all | Where-Object { $_.CreationDate -gt $Since -and $ids -notcontains $_.ParentProcessId } | ForEach-Object {
+        Write-Host "  [reap] $($_.Name) ($($_.ProcessId)) ค้างหลัง atomic - kill"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Atomic <TECHNIQUE> [TestNumbers]
 # กันค้าง: job + timeout (PowerShell ไม่มี setsid แต่ job แยก runspace ได้)
 # spawn จาก $SANDBOX เพื่อให้ lineage labeling จับได้ (seed)
 function Atomic {
     param([string]$Technique, [string]$TestNumbers = "")
     Write-Host "  [atomic] $Technique $TestNumbers"
+    $since = Get-Date
     $job = Start-Job -ScriptBlock {
         param($tech, $nums, $sandbox, $mod, $atomics)
         Set-Location $sandbox
@@ -105,6 +119,7 @@ function Atomic {
         Stop-Job $job
     }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
+    Stop-Orphans $since
     Start-Sleep -Seconds 3
 }
 

@@ -3,6 +3,8 @@
 machine_eval.py - leave-one-machine-out (NCCY review group C: more machines / OS versions).
 
 Machine 1 = the paper dataset (FINAL_DATASET.csv): Ubuntu 22.04 target1, Windows 10 wintarget.
+            Windows rows are replaced by data/machine1_win_fixed/ (same events, relabeled after the
+            12 Oct 2026 parse_sysmon.py fix for multi-line CommandLine, which cut the lineage tree).
 Machine 2 = collected after the review with the same scenarios: Ubuntu 24.04 target2,
             Windows 11 wintarget2 (data/machine2/*_labeled.csv.gz, listed in M2_RUNS).
 Per OS: train on one machine, test on the other (both directions), plus a same-machine
@@ -22,16 +24,24 @@ from cross_platform_eval import NEUTRAL, run_fold, tactic_counts
 
 OUT = os.path.join(os.path.dirname(_HERE), "reference", "machine_eval")
 DATA = os.path.join(os.path.dirname(_HERE), "data", "machine2")
+FIXED = os.path.join(os.path.dirname(_HERE), "data", "machine1_win_fixed")
 M2_RUNS = ["benign_target2_214347_20261011_214347", "ransomware_target2_215549_20261011_215549",
            "miner_target2_220721_20261011_220721", "exploit_target2_222003_20261011_222003",
            "botnet_target2_223155_20261011_223155", "trojan_target2_224548_20261011_224548",
            "benign_183520_20261011_114718", "ransomware_win_184757_20261011_115952",
-           "miner_win_190031_20261011_124209", "botnet_win_194231_20261011_132414",
-           "trojan_win_202437_20261011_133658", "exploit_win_203717_20261011_135538"]
+           "miner_win_072144_20261012_005843", "botnet_win_075907_20261012_012847",
+           "trojan_win_082912_20261012_020415", "exploit_win_203717_20261011_135538"]
 
 
 def load(final):
     d = pd.read_csv(final, low_memory=False)
+    win = []
+    for r in sorted(d.run_id[d.platform == "windows"].unique()):
+        e = pd.read_csv(os.path.join(FIXED, r + "_labeled.csv.gz"), low_memory=False)
+        assert len(e) == (d.run_id == r).sum(), r
+        e["run_id"] = r
+        win.append(e)
+    d = pd.concat([d[d.platform != "windows"]] + win, ignore_index=True)
     d["machine"] = 1
     extra = []
     for r in M2_RUNS:
