@@ -247,6 +247,23 @@ def parse_line(line, session, platform="linux"):
     return row
 
 
+def records(fin, platform):
+    """Windows export: one event per line, except a CommandLine with newlines spans several lines.
+    12 Oct 2026: reading line by line lost every field after CommandLine (ParentProcessGuid too),
+    which cut the lineage tree (paper data: 105 Windows ProcessCreate events). Join until </Event>."""
+    if platform != "windows":
+        yield from fin
+        return
+    buf = []
+    for line in fin:
+        buf.append(line)
+        if "</Event>" in line:
+            yield "".join(buf)
+            buf = []
+    if buf:
+        yield "".join(buf)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+", help="ไฟล์ log (รองรับ wildcard)")
@@ -283,7 +300,7 @@ def main():
             print(f"[*] อ่าน {p.name}  (session={session})")
 
             with open(p, encoding="utf-8", errors="replace") as fin:
-                for line in fin:
+                for line in records(fin, args.platform):
                     row = parse_line(line, session, args.platform)
                     if row is None:
                         stats["skipped"] += 1

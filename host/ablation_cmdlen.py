@@ -1,9 +1,14 @@
+"""ablation_cmdlen.py - RF with all 32 features vs without cmd_len/pcmd_len (paper section 5).
+usage: python host/ablation_cmdlen.py [dataset_dir] [output_dir]
+"""
 import numpy as np, pandas as pd, json
 import revised_experiments as R
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score, roc_auc_score
-R.DATA='/mnt/user-data/uploads/sysmon-lab/host/dataset'
+import os, sys
+if len(sys.argv) > 1: R.DATA = sys.argv[1]   # default: host/dataset (see REPRODUCE.md)
+if len(sys.argv) > 2: R.OUT = sys.argv[2]    # default: reference/revised_results
 raw,extra=R.load()
 f,m,_=R.aggregate(raw)
 y=m.label.values; g=m.lineage.values
@@ -19,4 +24,4 @@ for name,cols in [('all32',list(f.columns)),('no_cmd',[c for c in f.columns if c
 med=f.groupby(y)[['cmd_len','pcmd_len']].median()
 out['median_cmd_len']={'label0':float(med.loc[0,'cmd_len']),'label1':float(med.loc[1,'cmd_len'])}
 out['median_pcmd_len']={'label0':float(med.loc[0,'pcmd_len']),'label1':float(med.loc[1,'pcmd_len'])}
-print(json.dumps(out,indent=1)); json.dump(out,open('results/ablation_cmdlen.json','w'),indent=1)
+print(json.dumps(out,indent=1)); os.makedirs(R.OUT,exist_ok=True); json.dump(out,open(os.path.join(R.OUT,'ablation_cmdlen.json'),'w'),indent=1)
