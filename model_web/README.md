@@ -79,3 +79,28 @@ CSV ตัวอย่างมาจากข้อมูลที่ใช้�
 
 ไฟล์เว็บทั้งหมดอยู่ในโฟลเดอร์นี้: model_web.py, uploaded_model.py, feature_processing.py, assets/, start_model_web.ps1, requirements*.txt, examples/ และ models/ (fixture สำหรับทดสอบเดิม)
 หากย้ายไปเครื่องอื่น ให้สร้าง .venv ในโฟลเดอร์นี้และติดตั้ง requirements.txt; ตัวอย่างวิจัยต้องติดตั้ง requirements_research.txt เพิ่ม
+
+## ส่งออก Random Forest จากข้อมูลที่แก้ไขแล้ว
+
+รันจากราก repository ด้วย environment ที่มี scikit-learn, pandas, numpy, scipy และ joblib:
+
+```powershell
+python model_web/export_updated_rf.py --combined --out model_web/exports/my_combined_run
+```
+
+ตัด `--combined` ออกหากต้องการฝึกแยก OS ใช้โฟลเดอร์ผลลัพธ์ใหม่ที่ยังว่าง
+สคริปต์ใช้ข้อมูลหลัก `data/FINAL_DATASET_fixed.csv.gz` และ `data/repeat/` ฝึกบนเครื่องที่ 1
+แล้วทดสอบกับ `data/machine2/` โดยไม่ใช้ข้อมูลเครื่องที่ 2 ฝึกหรือปรับ threshold
+ใช้ฟีเจอร์พฤติกรรม 53 ตัวตาม `host/replay_detect.py` และคัดโปรเซสเครื่องมือทดลองออก
+ผลรวมเป็น estimator ตัวเดียว ไม่ได้เลือกโมเดลย่อยตาม OS
+
+อัปโหลด `.pkl` กับ CSV `test_*_features.csv` ที่ส่งออกคู่กัน โดยเลือกโหมดฟีเจอร์ที่เตรียมแล้ว
+ไม่ใช้โหมด Event ดิบ 32 ฟีเจอร์กับโมเดลรุ่นนี้ คะแนนรวมและแยก OS อยู่ในไฟล์ metrics
+เก็บรายการข้อมูลและเวอร์ชันโค้ดใน manifest เพื่อแยกจากผลหลัก 32 ฟีเจอร์ของบทความ
+
+สำหรับ Event CSV ใหม่ตาม schema ของโครงการ ใช้ `prepare_behavior_csv.py --csv <ไฟล์> --os both --out <ไฟล์ฟีเจอร์>`
+หรือเลือก `--os linux` / `--os windows` ต้องมี `platform` และ `run_id` ตามจริง
+หากต้องการให้ preprocessing ตรงกับโมเดลเดิม ให้ใช้สคริปต์และ `preprocessing_source/` ในโฟลเดอร์ export รุ่นนั้น
+
+`exports/`, `models/`, log และ CSV ที่คลายจากไฟล์ `.gz` เป็นไฟล์ในเครื่อง ไม่ commit ซ้ำใน Git
+ไฟล์เหล่านี้ไม่ได้ถูกลบ สามารถสร้างใหม่จากสคริปต์หรือแจกเป็นชุดดาวน์โหลดแยกได้
