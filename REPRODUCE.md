@@ -56,7 +56,7 @@ To rebuild the CSVs from the raw Sysmon logs instead, see `host/rebuild_dataset.
 | Cross-platform transfer (train one OS, test the other) | `python host/cross_platform_eval.py --merged merged_dataset.csv` | `reference/cross_platform/` |
 | Post-review leave-one-machine-out | `python host/machine_eval.py` (reads `FINAL_DATASET.csv`, `data/machine1_win_fixed/`, `data/machine2/`) | `reference/machine_eval/` |
 | Post-review leave-one-repetition-out | `python host/repeat_eval.py` (reads the same files as `machine_eval.py` plus `data/repeat/`) | `reference/repeat_eval/` |
-| Model for external CSVs (detector + attack type per OS) and evaluation web page | `python host/export_model.py`, then `python host/eval_web.py` (http://127.0.0.1:8090) | `models/paper_rf.pkl` |
+| Model for external CSVs (32 features, detector + attack type per OS) for the evaluation web page | `python host/export_model.py`, then `python model_web/model_web.py` (http://127.0.0.1:8765, Sysmon Event mode) | `models/paper_rf_linux.pkl`, `models/paper_rf_windows.pkl` |
 
 `revised_experiments.py` takes optional `[dataset_dir] [output_dir]` arguments; it caches finished
 protocols as CSV in the output directory, so delete that directory to recompute everything (~5 min on 16 cores).

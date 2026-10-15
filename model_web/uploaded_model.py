@@ -92,7 +92,21 @@ def load_trusted_model(data, filename, trusted=False):
                 columns=names, feature_count=int(count) if count is not None else len(names) or None,
                 preprocessing='Pipeline' if isinstance(model, Pipeline) else type(scaler).__name__ if scaler is not None else 'ไม่มีในไฟล์',
                 score_kind=score_kind, outlier=outlier, notes=notes)
-    return dict(model=model, scaler=scaler, metadata=info)
+    typer = bundle.get('typer')
+    if typer is not None:
+        if not is_classifier(typer) or not callable(getattr(typer, 'predict_proba', None)):
+            raise ValueError('typer ในไฟล์ต้องเป็นโมเดลจำแนกที่มี predict_proba()')
+        if getattr(typer, 'n_features_in_', len(names)) != len(names):
+            raise ValueError('typer ต้องรับฟีเจอร์ชุดเดียวกับโมเดลตรวจจับ')
+        info['attack_types'] = [str(c) for c in typer.classes_]
+    if bundle.get('platform') in ('linux', 'windows'):
+        info['platform'] = bundle['platform']
+    return dict(model=model, scaler=scaler, metadata=info, typer=typer)
+
+
+def importances(model):
+    est = model.steps[-1][1] if isinstance(model, Pipeline) else model
+    return getattr(est, 'feature_importances_', None)
 
 
 def feature_order(artifact, supplied):
@@ -154,6 +168,14 @@ def run_uploaded(artifact, data, filename, options, read_events, metric_block, m
         rows.index.name = 'process_key'; rows = rows.reset_index()
         events, dropped = audit['input_events'], audit['dropped_events']
         notes.extend(audit['notes'])
+        imp = importances(artifact['model'])
+        dead = [c for c in audit['dead_features'] if c in names]
+        if dead and imp is not None:
+            share = float(sum(imp[names.index(c)] for c in dead))
+            notes.insert(0, f'ฟีเจอร์ {", ".join(dead)} เป็นค่าคงที่เพราะคอลัมน์ต้นทางหายไป คิดเป็น {share:.0%} ของ importance ของโมเดล ผลจึงต่ำกว่าข้อมูลที่มีคอลัมน์ครบ')
+        trained_on = artifact['metadata'].get('platform')
+        if trained_on and set(rows.platform) - {trained_on}:
+            notes.insert(0, f'โมเดลนี้ฝึกบน {trained_on} แต่ข้อมูลเป็น {", ".join(sorted(set(rows.platform)))} บทความพบว่าข้าม OS ไม่ได้')
         notes.append('ใช้ตัวรวม Event ของโครงการปัจจุบันตามที่ผู้ใช้ยืนยัน ไม่ได้อนุมานจากนามสกุล .pkl')
     elif mode == 'features':
         d, x, truth = read_feature_csv(data, names, options.get('label_column', 'label'), max_rows)
@@ -213,11 +235,23 @@ def run_uploaded(artifact, data, filename, options, read_events, metric_block, m
     rows['prediction'] = pred
     rows['score'] = s if s is not None else np.nan
     rows['seen_in_training'] = None  # Unknown, including in downloaded CSV; never claim no overlap.
+    attack_types = None
+    if artifact.get('typer') is not None:
+        rows['attack_type'] = None
+        flag = (pred == 1)
+        if flag.any():
+            typer = artifact['typer']  # fitted on unscaled features, so it gets x rather than model_input
+            tp = typer.predict_proba(x.loc[flag] if hasattr(typer, 'feature_names_in_') else x.to_numpy()[flag])
+            rows.loc[flag, 'attack_type'] = typer.classes_[tp.argmax(1)]
+            counts = rows.loc[flag, 'attack_type'].value_counts()
+            attack_types = [dict(type=str(k), processes=int(v), share=float(v / flag.sum())) for k, v in counts.items()]
+        notes.append('ประเภทการโจมตีทายเฉพาะตัวอย่างที่ถูกทำนายเป็นการโจมตี และมีได้แค่ประเภทที่ typer รู้จัก '
+                     '(สถานการณ์จำลองในแล็บ) ตัวอย่างที่ทำนายผิดเป็นการโจมตีก็ได้ประเภทด้วย')
     rows = rows.sort_values('score', ascending=False, na_position='last')
     report = dict(filename=filename, model=artifact['metadata']['name'], model_file=artifact['metadata']['filename'],
                   model_sha256=artifact['metadata']['sha256'], input_mode=mode, score_kind=kind,
                   threshold=threshold, events=events, dropped_events=dropped, processes=len(rows),
                   flagged=int(rows.prediction.sum()), labeled=int(rows.true_label.notna().sum()), overlap=None,
-                  notes=notes, metrics=metric_block(rows),
+                  notes=notes, metrics=metric_block(rows), attack_types=attack_types,
                   by_os={p:dict(processes=len(r),flagged=int(r.prediction.sum()),metrics=metric_block(r)) for p,r in rows.groupby('platform')})
     return report, rows

@@ -35,9 +35,14 @@ MODEL_DIR = ROOT / 'models' / 'web_tester'
 MODEL_FILE = MODEL_DIR / 'random_forest.joblib'
 MAX_BYTES = 100 * 1024 * 1024
 MAX_ROWS = 200_000
-REQUIRED = ['EventID', 'UtcTime', 'ProcessGuid', 'ParentProcessGuid',
-            'CommandLine', 'ParentCommandLine', 'TargetFilename',
-            'DestinationIp', 'DestinationPort', 'TargetObject', 'Device']
+REQUIRED = ['EventID', 'ProcessGuid']
+# Optional raw columns -> the 32 features they feed. A missing column becomes empty, so these features
+# turn constant; the page reports them and how much model importance they carry (public datasets such
+# as NLME have no CommandLine/ParentCommandLine/Device).
+OPTIONAL = {'UtcTime': ['dur_s', 'rate'], 'ParentProcessGuid': [], 'CommandLine': ['cmd_len'],
+            'ParentCommandLine': ['pcmd_len'], 'TargetFilename': ['n_files'], 'DestinationIp': ['n_dst_ip'],
+            'DestinationPort': ['n_dst_port'], 'TargetObject': ['n_regobj'], 'Device': ['n_device']}
+WIN_ONLY_EVENTS = {2, 6, 7, 8, 10, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 24, 25, 26}
 RESULTS: OrderedDict = OrderedDict()
 RESULT_LOCK = threading.Lock()
 PREDICT_LOCK = threading.Lock()
@@ -46,6 +51,20 @@ UPLOADED_MODELS: OrderedDict = OrderedDict()
 
 def source_hash():
     return hashlib.sha256(Path(rx.__file__).read_bytes()).hexdigest()
+
+
+def detect_os(d):
+    r"""Evidence per OS: C:\ vs / paths, DOMAIN\user, EventIDs Sysmon for Linux never emits."""
+    win = lin = 0
+    for c in ('Image', 'TargetFilename', 'CurrentDirectory'):
+        if c in d:
+            s = d[c].dropna().astype(str)
+            win += int(s.str.match(r'^[A-Za-z]:\\').sum())
+            lin += int(s.str.startswith('/').sum())
+    if 'User' in d:
+        win += int(d.User.dropna().astype(str).str.contains('\\', regex=False).sum())
+    win += int(pd.to_numeric(d.EventID, errors='coerce').isin(WIN_ONLY_EVENTS).sum())
+    return ('windows' if win >= lin else 'linux'), win, lin
 
 
 def read_events(data: bytes, platform='', run_id=''):
@@ -74,14 +93,22 @@ def read_events(data: bytes, platform='', run_id=''):
     if len(d) > MAX_ROWS:
         raise ValueError('รองรับไม่เกิน 200,000 Event ต่อไฟล์')
     notes = []
+    detected, win, lin = detect_os(d)
     if 'platform' not in d:
-        if platform not in ('linux', 'windows'):
-            raise ValueError('ไฟล์ไม่มี platform: เลือกระบบปฏิบัติการในช่องข้อมูลที่ขาด')
-        d['platform'] = platform
-        notes.append('ใช้ platform ที่ระบุให้ทุก Event ในไฟล์')
+        if platform in ('linux', 'windows'):
+            d['platform'] = platform
+            notes.append('ใช้ platform ที่ระบุให้ทุก Event ในไฟล์')
+        else:
+            if min(win, lin) > 0.05 * max(win, lin):
+                raise ValueError(f'ไฟล์มีหลักฐานของทั้ง Windows ({win:,}) และ Linux ({lin:,}) ปนกัน แยกไฟล์ตาม OS หรือเลือก OS เอง')
+            d['platform'] = detected
+            notes.append(f'ไม่มีคอลัมน์ platform: ตรวจได้ว่าเป็น {detected} (หลักฐาน Windows {win:,} จุด, Linux {lin:,} จุด)')
     d['platform'] = d.platform.str.strip().str.lower()
     if not d.platform.isin(['windows', 'linux']).all():
         raise ValueError('platform ต้องเป็น windows หรือ linux ทุกแถว')
+    if 'run_id' not in d and not run_id.strip() and 'host_name' in d:
+        d['run_id'] = d.host_name.fillna('unknown')
+        notes.append('ไม่มี run_id: ใช้ host_name แยกโปรเซสของแต่ละเครื่อง')
     if 'run_id' not in d:
         if not run_id.strip():
             raise ValueError('ไฟล์ไม่มี run_id: ถ้าเป็นข้อมูลหนึ่งรอบ ให้ระบุรหัสรอบทดลองก่อนทดสอบ')
@@ -99,10 +126,16 @@ def read_events(data: bytes, platform='', run_id=''):
     unknown = sorted(set(d.EventID) - set(rx.EVENT_IDS))
     if unknown:
         raise ValueError('EventID นอก schema ของโมเดลนี้: ' + ', '.join(str(int(x)) for x in unknown))
+    lost = [c for c in OPTIONAL if c not in d or d[c].isna().all()]
+    for c in lost:
+        d[c] = np.nan
+    if lost:
+        notes.append('ไม่มีหรือว่างทั้งคอลัมน์: ' + ', '.join(lost) + ' ฟีเจอร์ที่ได้จากคอลัมน์เหล่านี้เป็นค่าคงที่')
     times = pd.to_datetime(d.UtcTime, errors='coerce', format='mixed', utc=True)
-    if times.isna().any():
+    if 'UtcTime' not in lost and times.isna().any():
         raise ValueError(f'UtcTime ว่างหรืออ่านไม่ได้ {int(times.isna().sum()):,} แถว')
     d['UtcTime'] = times.dt.strftime('%Y-%m-%d %H:%M:%S.%f')
+    dead = [x for c in lost for x in OPTIONAL[c]]
     truth = pd.to_numeric(d['label'], errors='coerce') if 'label' in d else pd.Series(np.nan, index=d.index)
     if 'label' in d and (d.label.notna() & ~truth.isin([0, 1])).any():
         raise ValueError('label ต้องเป็น 0, 1 หรือเว้นว่าง')
@@ -110,7 +143,8 @@ def read_events(data: bytes, platform='', run_id=''):
     # Placeholder only for rx.aggregate's metadata. Never counted as ground truth.
     d['label'] = truth.fillna(0).astype(int)
     for col in ['ProcessGuid', 'ParentProcessGuid']:
-        d[col] = d[col].str.strip().str.lower().replace('', np.nan)
+        if d[col].notna().any():  # an absent ParentProcessGuid stays all-NaN (no .str on floats)
+            d[col] = d[col].str.strip().str.lower().replace('', np.nan)
     invalid = d.ProcessGuid.isna() | d.ProcessGuid.eq(rx.NULL_GUID)
     dropped = int(invalid.sum())
     d = d.loc[~invalid].copy()
@@ -127,7 +161,8 @@ def read_events(data: bytes, platform='', run_id=''):
         notes.append(f'ตัด {dropped:,} Event ที่ ProcessGuid ว่างหรือเป็นรหัสศูนย์')
     if conflict:
         notes.append(f'{conflict:,} โปรเซสมี label หลายค่า: ใช้ค่าสูงสุดตามโค้ดวิจัย')
-    return d, f, m, dict(input_events=len(truth), dropped_events=dropped, notes=notes)
+    return d, f, m, dict(input_events=len(truth), dropped_events=dropped, notes=notes, dead_features=dead,
+                         detected_os=detected)
 
 
 def train(csv_path: Path):
@@ -173,7 +208,9 @@ def metric_block(rows):
     score_values = known.score.to_numpy() if known.score.notna().all() else None
     scores = rx.scores(y, p, score_values)
     scores = {k: float(v) if np.isfinite(v) else None for k, v in scores.items()}
-    scores.update(n_labeled=len(y), confusion=confusion_matrix(y, p, labels=[0, 1]).tolist())
+    scores.update(n_labeled=len(y), confusion=confusion_matrix(y, p, labels=[0, 1]).tolist(),
+                  baseline_all_benign_accuracy=float((y == 0).mean()),
+                  baseline_all_attack_f1=float(2 * y.mean() / (1 + y.mean())))
     return scores
 
 
@@ -250,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         url = urlsplit(self.path)
         if url.path == '/api/model':
-            self.send(200, dict(ready=False, token=self.server.upload_token, required=REQUIRED,
+            self.send(200, dict(ready=False, token=self.server.upload_token, required=REQUIRED, optional=list(OPTIONAL),
                                 max_bytes=MAX_BYTES, max_rows=MAX_ROWS))
         elif url.path == '/api/sample':
             self.send(404, dict(error='ใช้ CSV ที่ตรงกับโมเดลของคุณ'))

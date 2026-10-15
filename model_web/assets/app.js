@@ -68,6 +68,9 @@ function render(){
  $('event-note').textContent=(result.input_mode==='events'?num(result.events)+' Event · ตัดรหัสที่ใช้ไม่ได้ '+num(result.dropped_events)+' Event':num(result.processes)+' แถวฟีเจอร์')+' · '+(result.threshold==null?'ใช้ predict() ของโมเดล':'เกณฑ์ predict_proba '+result.threshold.toFixed(2));
  $('overlap').hidden=false;$('overlap').textContent='ยังยืนยันไม่ได้ว่าข้อมูลทดสอบแยกจากชุดฝึกของโมเดลนี้ กรุณาตรวจแหล่งข้อมูลก่อนอ้างอิงคะแนน';
  for(const [id,k] of [['f1','F1'],['precision','Precision'],['recall','Recall'],['auc','AUC'],['accuracy','Accuracy'],['fpr','FPR']]) $('metric-'+id).textContent=score(m?.[k]);
+ $('baseline-note').textContent=m?'เทียบ baseline: ทายว่าปกติทุกตัวได้ Accuracy '+score(m.baseline_all_benign_accuracy)+' · ทายว่าโจมตีทุกตัวได้ F1 '+score(m.baseline_all_attack_f1)+' (Accuracy/F1 ของโมเดลต้องสูงกว่านี้จึงมีความหมาย)':'';
+ const types=result.attack_types;$('attack-types').hidden=!types?.length;
+ if(types?.length)$('attack-types').textContent='ประเภทหลัก: '+types[0].type+' ('+(types[0].share*100).toFixed(0)+'% ของตัวอย่างที่ถูกทำนายเป็นการโจมตี)'+(types.length>1?' · อื่นๆ: '+types.slice(1).map(t=>t.type+' '+(t.share*100).toFixed(0)+'%').join(', '):'');
  $('metric-note').textContent=m?'คะแนนจาก '+num(m.n_labeled)+' ตัวอย่างที่มี label'+(m.AUC==null?' · ROC-AUC ไม่มีคะแนนโมเดลหรือมี label เพียงคลาสเดียว':''):'ไม่มี label จริงสำหรับคำนวณคะแนน';
  for(const [id,a,b] of [['tn',0,0],['fp',0,1],['fn',1,0],['tp',1,1]]) $(id).textContent=m?num(m.confusion[a][b]):'—';
  renderTable();
@@ -81,13 +84,13 @@ function renderTable(){
   function cell(text,sub){const td=document.createElement('td'),main=document.createElement('strong');main.textContent=text;td.append(main);if(sub){const small=document.createElement('small');small.textContent=sub;td.append(small);}tr.append(td);return td;}
   const name=(r.Image||r.process_key).split(/[\\/]/).pop();cell(name,r.ProcessGuid).title=r.Image||'';
   cell(r.platform==='windows'?'Windows':r.platform==='linux'?'Linux':'ไม่ระบุ',r.run);cell(r.n_events==null?'—':num(r.n_events));cell(score(r.score));
-  const td=document.createElement('td'),badge=document.createElement('span');badge.className='badge'+(r.prediction?' bad':'');badge.textContent=r.prediction?'การโจมตี / ผิดปกติ':'ปกติ';td.append(badge);tr.append(td);
+  const td=document.createElement('td'),badge=document.createElement('span');badge.className='badge'+(r.prediction?' bad':'');badge.textContent=r.prediction?'การโจมตี / ผิดปกติ':'ปกติ';td.append(badge);tr.append(td);cell(r.attack_type||'—');
   cell(r.true_label==null?'ไม่มี':r.true_label===1?'1 · การโจมตี':'0 · ปกติ');fragment.append(tr);
  }
- if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=6;td.textContent='ไม่พบตัวอย่างตามเงื่อนไข';tr.append(td);fragment.append(tr);}
+ if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=7;td.textContent='ไม่พบตัวอย่างตามเงื่อนไข';tr.append(td);fragment.append(tr);}
  $('process-rows').replaceChildren(fragment);$('row-count').textContent=num(rows.length)+' ตัวอย่าง';$('page-count').textContent='หน้า '+(page+1)+' / '+pages;$('prev').disabled=page===0;$('next').disabled=page>=pages-1;
 }
 $('os-filter').addEventListener('change',()=>{page=0;render();});
 for(const id of ['search','flagged-only']) $(id).addEventListener('input',()=>{page=0;renderTable();});
 $('prev').addEventListener('click',()=>{page--;renderTable();});$('next').addEventListener('click',()=>{page++;renderTable();});
-(async()=>{try{const r=await fetch('/api/model');if(!r.ok)throw Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');const d=await r.json();token=d.token;$('schema-columns').textContent=['platform','run_id',...d.required].join(', ');sync();}catch(e){error('model-error',e.message);}})();
+(async()=>{try{const r=await fetch('/api/model');if(!r.ok)throw Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');const d=await r.json();token=d.token;$('schema-columns').textContent=d.required.join(', ');$('optional-columns').textContent=['platform','run_id','label','Image','User',...d.optional].join(', ');sync();}catch(e){error('model-error',e.message);}})();

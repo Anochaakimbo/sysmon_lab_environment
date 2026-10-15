@@ -110,5 +110,59 @@ class UploadedModelTests(unittest.TestCase):
         model = RandomForestClassifier(n_estimators=2).fit(self.x, [0,0,0,1,1,1,2,2])
         with self.assertRaises(ValueError): self.artifact(model)
 
+class EventModeTests(unittest.TestCase):
+    """Event mode with the paper's 32 features: OS detection, missing optional columns, attack type."""
+    @classmethod
+    def setUpClass(cls):
+        rows = []
+        for run, os_, label, img in [('r1', 'windows', 1, 'C:\lab\a.exe'), ('r1', 'windows', 0, 'C:\Windows\b.exe')]:
+            for i in range(30):
+                g = '{%08d-0000-0000-0000-%012d}' % (label + 1, i)  # never the null GUID
+                rows += [dict(EventID=e, ProcessGuid=g, UtcTime='2026-10-12 10:00:%02d.000' % (j + 1), Image=img,
+                              User='DESKTOP\vagrant', TargetFilename=img + str(j) if e == 11 else None, label=label)
+                         for j, e in enumerate([1, 11, 11, 13][: 2 + label * 2])]
+        cls.events = pd.DataFrame(rows)
+        f, m, _ = app.rx.aggregate(cls.events.assign(platform='windows', run_id='r1', session='s', ParentProcessGuid=np.nan,
+                                                     CommandLine=np.nan, ParentCommandLine=np.nan, DestinationIp=np.nan,
+                                                     DestinationPort=np.nan, TargetObject=np.nan, Device=np.nan))
+        y = m.label.to_numpy()
+        model = RandomForestClassifier(n_estimators=10, random_state=0).fit(f.to_numpy(), y)
+        typer = RandomForestClassifier(n_estimators=5, random_state=0).fit(f.to_numpy()[y == 1], ['ransomware'] * int(y.sum()))
+        stream = io.BytesIO()
+        joblib.dump(dict(model=model, columns=list(f.columns), typer=typer, platform='linux'), stream)
+        cls.artifact = upload.load_trusted_model(stream.getvalue(), 'paper.pkl', True)
+
+    def run_events(self, df):
+        return upload.run_uploaded(self.artifact, df.to_csv(index=False).encode(), 'e.csv',
+                                   dict(mode='events', confirm_event_schema='1', run_id='r1'),
+                                   app.read_events, app.metric_block, 200000)
+
+    def test_detect_os(self):
+        self.assertEqual(app.detect_os(self.events)[0], 'windows')
+        self.assertEqual(app.detect_os(pd.DataFrame(dict(EventID=[1, 5], Image=['/usr/bin/x', '/bin/sh'])))[0], 'linux')
+
+    def test_missing_columns_baseline_and_types(self):
+        report, rows = self.run_events(self.events)
+        self.assertEqual(set(rows.platform), {'windows'})
+        self.assertTrue(any('CommandLine' in n for n in report['notes']))
+        self.assertTrue(any('ฝึกบน linux' in n for n in report['notes']))
+        m = report['metrics']
+        self.assertAlmostEqual(m['baseline_all_benign_accuracy'], 0.5)
+        self.assertAlmostEqual(m['baseline_all_attack_f1'], 2 / 3)
+        self.assertEqual(report['attack_types'][0]['type'], 'ransomware')
+        self.assertTrue(rows.loc[rows.prediction == 0, 'attack_type'].isna().all())
+
+    def test_mixed_os_rejected(self):
+        mixed = pd.concat([self.events, self.events.assign(Image='/usr/bin/x', User='root')])
+        with self.assertRaisesRegex(ValueError, 'ปนกัน'):
+            self.run_events(mixed)
+
+    def test_typer_feature_count_checked(self):
+        stream = io.BytesIO()
+        bad = RandomForestClassifier(n_estimators=2).fit(np.zeros((4, 3)), ['a', 'b', 'a', 'b'])
+        joblib.dump(dict(model=self.artifact['model'], columns=self.artifact['metadata']['columns'], typer=bad), stream)
+        with self.assertRaisesRegex(ValueError, 'typer'):
+            upload.load_trusted_model(stream.getvalue(), 'x.pkl', True)
+
 if __name__=='__main__':
     unittest.main()
