@@ -56,6 +56,7 @@ To rebuild the CSVs from the raw Sysmon logs instead, see `host/rebuild_dataset.
 | Cross-platform transfer (train one OS, test the other) | `python host/cross_platform_eval.py --merged merged_dataset.csv` | `reference/cross_platform/` |
 | Post-review leave-one-machine-out | `python host/machine_eval.py` (reads `FINAL_DATASET.csv`, `data/machine1_win_fixed/`, `data/machine2/`) | `reference/machine_eval/` |
 | Post-review leave-one-repetition-out | `python host/repeat_eval.py` (reads the same files as `machine_eval.py` plus `data/repeat/`) | `reference/repeat_eval/` |
+| Model for external CSVs (detector + attack type per OS) and evaluation web page | `python host/export_model.py`, then `python host/eval_web.py` (http://127.0.0.1:8090) | `models/paper_rf.pkl` |
 
 `revised_experiments.py` takes optional `[dataset_dir] [output_dir]` arguments; it caches finished
 protocols as CSV in the output directory, so delete that directory to recompute everything (~5 min on 16 cores).
@@ -104,3 +105,64 @@ paper exactly use `git checkout fa377a0` for the evaluation code; the current `m
 The deterministic models reproduce exactly. Random Forest and Decision Tree differ by at most 0.016 F1;
 the paper's numbers were computed in a different environment and tree construction is not bit-identical
 across scikit-learn versions even with a fixed `random_state`.
+
+## 6. Supplementary pooled Linux + Windows experiment (53 features)
+
+This is a separate experiment from the primary 32-feature tables above. In the
+updated manuscript it is Section 3.7 / Section 4.6, Table 6; feature importance
+is consequently Table 7. The two command-line scripts below are also available
+unchanged in commit `e496429` on `Web-model`; they do not require a web server.
+Their preprocessing and RF definition use `host/replay_detect.py` and
+`host/revised_experiments.py` from `98b9e43`.
+
+Use a separate environment with **Python 3.12.14**, then run from the repository
+root (use a new, empty output directory for each export):
+
+```bash
+python -m pip install -r model_web/requirements_experiment.txt
+python model_web/export_updated_rf.py --combined --out model_web/exports/pooled
+# Optional comparison: separate RF models for each OS, with the same holdout.
+python model_web/export_updated_rf.py --out model_web/exports/per_os
+```
+
+Inputs are the already versioned `data/FINAL_DATASET_fixed.csv.gz`, 24 compressed
+CSVs in `data/repeat/`, and 12 compressed CSVs in `data/machine2/`. An uncompressed
+`FINAL_DATASET_fixed.csv` is not needed. All 480,888 events cover 48 runs. After
+aggregation and harness filtering, machine 1 supplies 61,191 training processes
+(36 runs); machine 2 supplies 23,413 test processes (12 runs). No run or lineage
+appears in both splits.
+
+Features use `prefix_features(behavior=True, ages=[np.inf])`, then remove harness
+processes. The 53 features include `cmd_len` and `pcmd_len`; platform, run ID and
+label are not model inputs. One RF is trained on both OSes with seed 0, without
+scaling/PCA or test-set threshold tuning. The default `predict` decision is used.
+
+| Held-out data | Processes | Accuracy | Precision | Recall | F1 | FPR | ROC-AUC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Both OSes pooled | 23,413 | 0.982 | 0.970 | 0.970 | 0.970 | 0.013 | 0.993 |
+| Linux | 14,566 | 0.982 | 0.981 | 0.947 | 0.964 | 0.006 | 0.988 |
+| Windows | 8,847 | 0.981 | 0.959 | 0.994 | 0.976 | 0.028 | 0.999 |
+
+The separate-OS comparison gives F1 0.956 on Linux and 0.955 on Windows. These
+are one machine holdout, not repeated-CV means. Machine-2 results had already
+been used in repository method development, so this is not a fully blind test.
+It also does not establish unseen-OS transfer, unseen attacks, real-malware
+detection, or removal of command-length shortcuts. Do not compare these scores
+directly with the primary 32-feature tables, whose data and preprocessing differ.
+
+Outputs include `sysmon_rf_combined.pkl`, `test_combined_features.csv`,
+`combined_metrics.json` (overall and per-OS scores), expected predictions,
+input hashes, run/split manifests, copied preprocessing code, and exact runtime
+versions. The exporter reloads its own saved model and CSV and checks predictions
+and probabilities against the in-memory results. Generated files remain local
+under ignored `model_web/exports/`; they are not committed.
+
+To convert another CSV in the project's event schema with `platform` and `run_id`:
+
+```bash
+python model_web/prepare_behavior_csv.py --csv path/to/events.csv --os both --out path/to/features.csv
+```
+
+The resulting CSV has 53 feature columns plus metadata, and a label column only
+when supplied in the input. Use independent runs for evaluation; reusing the
+training events is not an independent accuracy test.

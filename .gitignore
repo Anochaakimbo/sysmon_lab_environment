@@ -25,3 +25,8 @@ data/FINAL_DATASET_fixed.csv
 # host/pcap/ = raw source of truth ตัวที่ 3 (backup ไว้ที่อื่นเหมือน logs/)
 host/pcap/
 host/zeek/
+ponytail/
+
+# Local generated models, evaluation CSVs and uncompressed dataset copy.
+model_web/exports/
+data/FINAL_DATASET_fixed.csv
