@@ -149,10 +149,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--barong", help="folder with extracted BarongTrace <n>result.csv files")
     ap.add_argument("--nlme", help="path to NLME.csv")
+    ap.add_argument("--events", nargs=3, action="append", default=[], metavar=("CSV", "NAME", "OS"),
+                    help="a labelled CSV already in the lab event schema (see host/public_sets/), e.g. APT29")
     ap.add_argument("--data", default=R.DATA)
     ap.add_argument("--out", default=os.path.join(os.path.dirname(R._HERE), "reference", "public_eval"))
     a = ap.parse_args()
-    assert a.barong or a.nlme, "give --barong and/or --nlme"
+    assert a.barong or a.nlme or a.events, "give --barong, --nlme and/or --events"
     R.DATA = a.data
     lab_raw = R.load()[0]
     p32, m32, _ = R.aggregate(lab_raw.copy())
@@ -162,6 +164,12 @@ if __name__ == "__main__":
         run("BarongTrace sample-lineage, names masked", "linux", barong(a.barong), lab, rows, lofo=True)
     if a.nlme:
         run("NLME", "windows", nlme(a.nlme), lab, rows, lofo=False)
+    for path, name, osn in a.events:
+        d = pd.read_csv(path, low_memory=False)
+        d["platform"] = osn
+        if "run_id" not in d:
+            d["run_id"] = d.host_name.astype(str)
+        run(name, osn, d, lab, rows, lofo=False)
     os.makedirs(a.out, exist_ok=True)
     pd.DataFrame(rows).round(4).to_csv(os.path.join(a.out, "results.csv"), index=False)
     print("->", os.path.join(a.out, "results.csv"))

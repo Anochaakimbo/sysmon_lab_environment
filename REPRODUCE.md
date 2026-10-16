@@ -58,6 +58,7 @@ To rebuild the CSVs from the raw Sysmon logs instead, see `host/rebuild_dataset.
 | Post-review leave-one-repetition-out | `python host/repeat_eval.py` (reads the same files as `machine_eval.py` plus `data/repeat/`) | `reference/repeat_eval/` |
 | Model for external CSVs (32 features, detector + attack type per OS) for the evaluation web page | `python host/export_model.py`, then `python model_web/model_web.py` (http://127.0.0.1:8765, Sysmon Event mode) | `models/paper_rf_linux.pkl`, `models/paper_rf_windows.pkl` |
 | Lab model on public Sysmon data (BarongTrace Linux, NLME Windows): 3 feature sets x 3 thresholds, plus leave-one-file-out on BarongTrace | clone https://github.com/bazz-066/linux-malware-dataset, unzip `Dataset/Original_Linux/<n>result.zip` into one folder (data only, nothing in it is run), then `python host/public_eval.py --barong <folder> --nlme reference/NLME.csv` | `reference/public_eval/results.csv` |
+| APT29 / Windows-APT 2025 / Splunk attack_data converters and the summary of all public-set results | `host/public_sets/*.py`, then `python host/public_eval.py --events <csv> <name> <os>`; full steps in `docs/public_dataset_eval.md` section 6 | `docs/public_dataset_eval.md` |
 
 `revised_experiments.py` takes optional `[dataset_dir] [output_dir]` arguments; it caches finished
 protocols as CSV in the output directory, so delete that directory to recompute everything (~5 min on 16 cores).
