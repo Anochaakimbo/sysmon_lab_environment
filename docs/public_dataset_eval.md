@@ -196,5 +196,5 @@ python host/public_sets/rank_unlabelled.py <dir>/otrf_events.csv models/paper_rf
 
 ตัวอย่างที่ทดสอบในเว็บ (โมเดล 50 run): BarongTrace ไฟล์ 9 ใช้เกณฑ์ 0.114 จากไฟล์ 1/10/12
 - ไม่ปรับเกณฑ์: accuracy 0.548
-- ปรับเกณฑ์: accuracy 0.721, F1 0.595, FPR 0.027
+- ปรับเกณฑ์: accuracy 0.718, F1 0.589, FPR 0.027 (ตามที่หน้าเว็บแสดง)
 - ไฟล์และผลที่ควรเห็นอยู่ใน `demo_data/README.md`

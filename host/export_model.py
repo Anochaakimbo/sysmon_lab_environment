@@ -30,6 +30,7 @@ for p in ("linux", "windows"):
     joblib.dump(dict(model=rf, columns=list(f.columns), typer=typer, platform=p,
                      metadata=dict(created=datetime.date.today().isoformat(), train_processes=int(on.sum()),
                                    train_label1_share=float(m.label[on].mean()), train_runs=int(m.run[on].nunique()),
-                                   training_data="%s, %s runs" % (os.path.basename(a.dataset), p))), out)
+                                   training_data="%s, %s runs" % (os.path.basename(a.dataset), p))), out,
+                compress=3)  # 50-run forests are 24-52 MB raw, 7-13 MB compressed; the web loads both
     print("%-7s %d runs, %d processes (label=1 %.1f%%), types %s -> %s"
           % (p, m.run[on].nunique(), on.sum(), 100 * m.label[on].mean(), list(typer.classes_), out))
