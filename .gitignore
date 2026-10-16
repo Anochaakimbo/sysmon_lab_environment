@@ -18,6 +18,8 @@ models/
 
 # Generated web exports are kept locally; reproduce with model_web/export_updated_rf.py.
 model_web/exports/
+# Downloaded public datasets and converted CSV files stay local.
+/model_web/examples/public CSV/
 # Uncompressed copy of the versioned data/FINAL_DATASET_fixed.csv.gz.
 data/FINAL_DATASET_fixed.csv
 
