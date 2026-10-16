@@ -225,7 +225,7 @@ def run_uploaded(artifact, data, filename, options, read_events, metric_block, m
             threshold = float(options.get('threshold', .5))
             if not np.isfinite(threshold) or not 0 <= threshold <= 1:
                 raise ValueError('threshold ต้องอยู่ระหว่าง 0 และ 1')
-            pred = (s >= threshold).astype(int)
+            pred = (s > threshold).astype(int)  # strict, like predict(): tied benign scores at the threshold stay benign
         if pred.ndim != 1 or len(pred) != len(rows) or not set(np.unique(pred)).issubset({0, 1}):
             raise ValueError('ผลทำนายต้องเป็นเวกเตอร์สองคลาส 0/1')
         if s is not None and (s.ndim != 1 or len(s) != len(rows) or not np.isfinite(s).all()):
@@ -255,3 +255,18 @@ def run_uploaded(artifact, data, filename, options, read_events, metric_block, m
                   notes=notes, metrics=metric_block(rows), attack_types=attack_types,
                   by_os={p:dict(processes=len(r),flagged=int(r.prediction.sum()),metrics=metric_block(r)) for p,r in rows.groupby('platform')})
     return report, rows
+
+
+def calibrate(artifact, data, filename, options, read_events, metric_block, max_rows, target_fpr=.05):
+    """threshold from a benign-only CSV of the target environment: the (1 - target_fpr) quantile of its scores,
+    so about target_fpr of comparable benign processes score above it. Rows labelled 1 are left out."""
+    if artifact['metadata']['score_kind'] != 'probability':
+        raise ValueError('ตั้งเกณฑ์จากข้อมูลปกติได้เฉพาะโมเดลที่มี predict_proba')
+    _, rows = run_uploaded(artifact, data, filename, dict(options, use_threshold='0'), read_events, metric_block, max_rows)
+    benign = rows[rows.true_label != 1]
+    if len(benign) < 20:
+        raise ValueError(f'ไฟล์ข้อมูลปกติมีตัวอย่างที่ใช้ได้ {len(benign)} ตัว ต้องมีอย่างน้อย 20')
+    s = benign.score.to_numpy()
+    thr = float(np.quantile(s, 1 - target_fpr))
+    return dict(threshold=thr, processes=len(benign), excluded_label1=int(len(rows) - len(benign)),
+                calibration_fpr=float((s > thr).mean()), target_fpr=target_fpr)

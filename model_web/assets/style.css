@@ -19,3 +19,4 @@
 .model-card h2{overflow-wrap:anywhere;font-size:24px}
 .model-card p{overflow-wrap:anywhere}
 @media(max-width:800px){.model-upload-grid{grid-template-columns:1fr;gap:20px}}
+.calibrate{display:inline-block;margin-top:10px;cursor:pointer}

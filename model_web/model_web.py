@@ -27,7 +27,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 import feature_processing as rx
-from uploaded_model import load_trusted_model, run_uploaded
+from uploaded_model import calibrate, load_trusted_model, run_uploaded
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = Path(__file__).with_name('assets')
@@ -310,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return
         url = urlsplit(self.path)
-        if url.path not in ('/api/predict', '/api/upload-model'):
+        if url.path not in ('/api/predict', '/api/upload-model', '/api/calibrate'):
             self.send(404, dict(error='ไม่พบ API')); return
         if not secrets.compare_digest(self.headers.get('X-Model-Token', ''), self.server.upload_token):
             self.send(403, dict(error='กรุณารีเฟรชหน้าเว็บก่อนอัปโหลด')); return
@@ -338,6 +338,9 @@ class Handler(BaseHTTPRequestHandler):
             artifact = UPLOADED_MODELS.get(options.get('model_id', ''))
             if artifact is None:
                 raise ValueError('กรุณาอัปโหลดโมเดลก่อน (หรือโมเดลหมดอายุ ให้โหลดใหม่)')
+            if url.path == '/api/calibrate':
+                self.send(200, calibrate(artifact, data, filename, options, read_events, metric_block, MAX_ROWS))
+                return
             report, rows = run_uploaded(artifact, data, filename, options, read_events, metric_block, MAX_ROWS)
             key = uuid.uuid4().hex
             with RESULT_LOCK:

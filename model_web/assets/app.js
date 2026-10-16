@@ -9,6 +9,7 @@ function sync(){
  $('label-column').disabled=busy||$('input-mode').value==='events';
  $('use-threshold').disabled=busy||modelInfo?.score_kind!=='probability';
  $('threshold').disabled=busy||!$('use-threshold').checked||modelInfo?.score_kind!=='probability';
+ $('benign-file').disabled=busy||!modelId||modelInfo?.score_kind!=='probability';
 }
 function clearResults(){result=null;$('results').hidden=true;$('process-panel').hidden=true;$('empty').hidden=false;$('result-tag').textContent='รอข้อมูล';}
 function chooseModel(file){
@@ -49,10 +50,20 @@ $('load-model').addEventListener('click',async()=>{
 });
 $('input-mode').addEventListener('change',()=>{const events=$('input-mode').value==='events';$('event-confirmation').hidden=!events;$('event-defaults').hidden=!events;clearResults();sync();});
 $('use-threshold').addEventListener('change',()=>{clearResults();sync();});
-$('threshold').addEventListener('input',()=>{$('threshold-value').textContent=Number($('threshold').value).toFixed(2);clearResults();});
+$('threshold').addEventListener('input',()=>{$('threshold-value').textContent=Number($('threshold').value).toFixed(3);clearResults();});
+function query(name){return new URLSearchParams({model_id:modelId,filename:name,mode:$('input-mode').value,features:$('features').value,label_column:$('label-column').value,threshold:$('threshold').value,use_threshold:$('use-threshold').checked?'1':'0',confirm_event_schema:$('confirm-event-schema').checked?'1':'0',platform:$('platform-default').value,run_id:$('run-id').value});}
+$('benign-file').addEventListener('change',async()=>{
+ const f=$('benign-file').files[0];$('benign-file').value='';if(!f||!modelId||busy)return;busy=true;sync();$('error').hidden=true;$('calibrate-status').textContent='กำลังให้คะแนนไฟล์ข้อมูลปกติ…';
+ try{
+  const r=await fetch('/api/calibrate?'+query(f.name),{method:'POST',headers:{'Content-Type':'text/csv; charset=utf-8','X-Model-Token':token},body:f});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'ตั้งเกณฑ์ไม่สำเร็จ');
+  $('use-threshold').checked=true;$('threshold').value=d.threshold;$('threshold-value').textContent=d.threshold.toFixed(3);clearResults();
+  $('calibrate-status').textContent='เกณฑ์ '+d.threshold.toFixed(3)+' จาก '+f.name+' · '+num(d.processes)+' ตัวอย่างปกติ (ตัด label 1 ออก '+num(d.excluded_label1)+') · FPR ในไฟล์นี้ '+(100*d.calibration_fpr).toFixed(1)+'%';
+ }catch(e){error('error',e.message);$('calibrate-status').textContent='ตั้งเกณฑ์ไม่สำเร็จ';}finally{busy=false;sync();}
+});
 $('predict').addEventListener('click',async()=>{
  if(!selected||!modelId||busy)return;busy=true;clearResults();sync();$('error').hidden=true;$('request-status').textContent='กำลังทำนายด้วยโมเดลที่อัปโหลด…';
- const q=new URLSearchParams({model_id:modelId,filename:selected.name,mode:$('input-mode').value,features:$('features').value,label_column:$('label-column').value,threshold:$('threshold').value,use_threshold:$('use-threshold').checked?'1':'0',confirm_event_schema:$('confirm-event-schema').checked?'1':'0',platform:$('platform-default').value,run_id:$('run-id').value});
+ const q=query(selected.name);
  try{
   const r=await fetch('/api/predict?'+q,{method:'POST',headers:{'Content-Type':'text/csv; charset=utf-8','X-Model-Token':token},body:selected});
   const d=await r.json();if(!r.ok)throw Error(d.error||'ทดสอบไม่สำเร็จ');result=d;page=0;$('os-filter').value='all';$('search').value='';$('flagged-only').checked=false;
@@ -65,7 +76,7 @@ $('predict').addEventListener('click',async()=>{
 function render(){
  if(!result)return;const os=$('os-filter').value,block=os==='all'?result:result.by_os[os],m=block?.metrics,n=block?.processes||0,flagged=block?.flagged||0;
  $('n-process').textContent=num(n);$('n-flagged').textContent=num(flagged);$('n-benign').textContent=num(n-flagged);
- $('event-note').textContent=(result.input_mode==='events'?num(result.events)+' Event · ตัดรหัสที่ใช้ไม่ได้ '+num(result.dropped_events)+' Event':num(result.processes)+' แถวฟีเจอร์')+' · '+(result.threshold==null?'ใช้ predict() ของโมเดล':'เกณฑ์ predict_proba '+result.threshold.toFixed(2));
+ $('event-note').textContent=(result.input_mode==='events'?num(result.events)+' Event · ตัดรหัสที่ใช้ไม่ได้ '+num(result.dropped_events)+' Event':num(result.processes)+' แถวฟีเจอร์')+' · '+(result.threshold==null?'ใช้ predict() ของโมเดล':'เกณฑ์ predict_proba > '+result.threshold.toFixed(3));
  $('overlap').hidden=false;$('overlap').textContent='ยังยืนยันไม่ได้ว่าข้อมูลทดสอบแยกจากชุดฝึกของโมเดลนี้ กรุณาตรวจแหล่งข้อมูลก่อนอ้างอิงคะแนน';
  for(const [id,k] of [['f1','F1'],['precision','Precision'],['recall','Recall'],['auc','AUC'],['accuracy','Accuracy'],['fpr','FPR']]) $('metric-'+id).textContent=score(m?.[k]);
  $('baseline-note').textContent=m?'เทียบ baseline: ทายว่าปกติทุกตัวได้ Accuracy '+score(m.baseline_all_benign_accuracy)+' · ทายว่าโจมตีทุกตัวได้ F1 '+score(m.baseline_all_attack_f1)+' (Accuracy/F1 ของโมเดลต้องสูงกว่านี้จึงมีความหมาย)':'';

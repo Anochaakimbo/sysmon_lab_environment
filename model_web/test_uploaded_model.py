@@ -93,7 +93,7 @@ class UploadedModelTests(unittest.TestCase):
 
     def test_threshold_explicit_and_validation(self):
         _, rows = self.predict(use_threshold='1', threshold='0')
-        self.assertTrue((rows.prediction==1).all())
+        self.assertTrue((rows.prediction == (rows.score > 0)).all())  # strict: a score equal to the threshold stays benign
         for value in ['nan','-1','2']:
             with self.assertRaises(ValueError): self.predict(use_threshold='1', threshold=value)
 
@@ -136,6 +136,16 @@ class EventModeTests(unittest.TestCase):
         return upload.run_uploaded(self.artifact, df.to_csv(index=False).encode(), 'e.csv',
                                    dict(mode='events', confirm_event_schema='1', run_id='r1'),
                                    app.read_events, app.metric_block, 200000)
+
+    def test_calibrate_from_benign(self):
+        benign = self.events[self.events.label == 0]
+        c = upload.calibrate(self.artifact, benign.to_csv(index=False).encode(), 'b.csv',
+                             dict(mode='events', confirm_event_schema='1', run_id='r1'), app.read_events, app.metric_block, 200000)
+        self.assertEqual((c['processes'], c['excluded_label1']), (30, 0))
+        self.assertLessEqual(c['calibration_fpr'], 0.05)
+        c = upload.calibrate(self.artifact, self.events.to_csv(index=False).encode(), 'b.csv',
+                             dict(mode='events', confirm_event_schema='1', run_id='r1'), app.read_events, app.metric_block, 200000)
+        self.assertEqual(c['excluded_label1'], 30)  # attack rows never set the benign threshold
 
     def test_detect_os(self):
         self.assertEqual(app.detect_os(self.events)[0], 'windows')
