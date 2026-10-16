@@ -2,15 +2,16 @@
 
 โจทย์จากอาจารย์: นำโมเดลที่ฝึกในแล็บไปตรวจ Sysmon dataset สาธารณะ แล้ววัดผล (เป้า 70–80%)
 
-**สรุปสั้น**
+**สรุปสั้น** (โมเดลที่เทรนจาก dataset สุดท้าย 50 run)
 
 - ชุดข้อมูลที่ "เก็บ Sysmon ครบทุก event" ใช้โมเดลได้จริง:
-  - APT29: AUC 0.83–0.86, balanced accuracy 0.76
-  - BarongTrace: balanced accuracy 0.73 และ accuracy 0.757 เมื่อปรับเกณฑ์จากข้อมูลปกติ
+  - APT29: AUC 0.84–0.87, balanced accuracy 0.72
+  - BarongTrace: balanced accuracy 0.72 และ accuracy 0.747 เมื่อปรับเกณฑ์จากข้อมูลปกติ
 - ชุดที่ "กรองเป็น alert" หรือ "ขาด CommandLine" ใช้ไม่ได้:
-  - Windows-APT 2025: AUC 0.47
-  - NLME: AUC 0.705 แต่แทบไม่ชนะการทายว่าปกติทั้งหมด
+  - Windows-APT 2025: AUC 0.44–0.55
+  - NLME: AUC 0.693 แต่แทบไม่ชนะการทายว่าปกติทั้งหมด
 - **accuracy ดิบหลอกตาได้ทั้งสองทาง** เพราะสัดส่วนการโจมตีในแต่ละชุดต่างกันมาก (6.7% ถึง 84.7%) จึงรายงาน AUC และ balanced accuracy คู่กับ baseline เสมอ
+- โมเดล 12 run ของเปเปอร์ได้ผลใกล้เคียงกัน (ตารางเทียบท้ายหัวข้อ 3)
 
 ---
 
@@ -18,7 +19,7 @@
 
 | ส่วน | รายละเอียด |
 |---|---|
-| โมเดล | Random Forest ตามเปเปอร์ (Table 3) ฝึกบน dataset แล็บฉบับแก้แล้ว (`FINAL_DATASET_fixed`) แยกตาม OS |
+| โมเดล | Random Forest ตามเปเปอร์ (Table 3) ฝึกบน dataset สุดท้าย 50 run (`data/FINAL_DATASET_50runs.csv.gz`) แยกตาม OS |
 | ระดับ | โปรเซส (รวม event ของ `ProcessGuid` เดียวกัน) |
 | ฟีเจอร์ 3 ชุด | **paper32** = 32 ตัวของเปเปอร์ · **clean** = 53 ตัว เพิ่มฟีเจอร์พฤติกรรมและตัดโปรเซสของตัวรันทดสอบ (harness) ออกตอนฝึก · **neutral** = 29 ตัวที่ไม่ผูกกับ OS/ความยาวคำสั่ง |
 | เกณฑ์ตัดสิน 3 แบบ | (1) 0.5 · (2) เปอร์เซ็นไทล์ 95 ของคะแนนโปรเซสปกติจาก **กลุ่มอื่น** (host/ไฟล์อื่น) · (3) เปอร์เซ็นไทล์ 95 ของโปรเซสปกติ **ครึ่งแรกของกลุ่มเดียวกัน** แล้ววัดเฉพาะครึ่งหลัง |
@@ -53,49 +54,50 @@
 
 ---
 
-## 3. ผลหลัก (ค่าที่ดีที่สุดที่ยุติธรรมของแต่ละชุด)
+## 3. ผลหลัก (โมเดล 50 run, ค่าที่ดีที่สุดที่ยุติธรรมของแต่ละชุด)
 
 | ชุด | ฟีเจอร์ / เกณฑ์ | AUC | recall | FPR | balanced acc | accuracy | baseline acc |
 |---|---|---|---|---|---|---|---|
-| **APT29** | clean / 0.5 | **0.861** | 0.716 | 0.198 | **0.759** | 0.796 | 0.933 |
-| APT29 | paper32 / 0.5 | 0.832 | 0.569 | 0.119 | 0.725 | 0.860 | 0.933 |
-| **BarongTrace** | clean / ข้อมูลปกติจากไฟล์อื่น | 0.683 | 0.505 | 0.050 | **0.728** | **0.757** | 0.565 |
-| BarongTrace | paper32 / ข้อมูลปกติจากไฟล์อื่น | 0.774 | 0.434 | 0.051 | 0.692 | 0.725 | 0.565 |
-| NLME | clean / ข้อมูลปกติจาก host อื่น | 0.562 | 0.225 | 0.042 | 0.592 | 0.814 | 0.804 |
-| NLME | paper32 / 0.5 | 0.705 | 0.177 | 0.020 | 0.579 | 0.823 | 0.804 |
-| Windows-APT 2025 | paper32 / ข้อมูลปกติจาก host อื่น | 0.474 | 0.337 | 0.027 | 0.655 | 0.434 | 0.847 |
+| **APT29** | neutral / 0.5 | 0.835 | 0.618 | 0.188 | **0.715** | 0.799 | 0.933 |
+| APT29 | clean / 0.5 | **0.869** | 0.431 | 0.094 | 0.669 | 0.874 | 0.933 |
+| **BarongTrace** | clean / ข้อมูลปกติจากไฟล์อื่น | 0.611 | 0.484 | 0.050 | **0.717** | **0.747** | 0.565 |
+| BarongTrace | paper32 / ข้อมูลปกติครึ่งแรกของไฟล์เดียวกัน | 0.756 | 0.461 | 0.053 | 0.704 | 0.722 | 0.565 |
+| NLME | paper32 / ข้อมูลปกติจาก host อื่น | 0.693 | 0.141 | 0.010 | 0.566 | 0.823 | 0.804 |
+| Windows-APT 2025 | paper32 / ข้อมูลปกติจาก host อื่น | 0.464 | 0.315 | 0.042 | 0.637 | 0.413 | 0.847 |
 
 **อ่านตารางอย่างไร**
-- **APT29:** accuracy 0.796 *ต่ำกว่า* baseline 0.933 เพราะการโจมตีมีแค่ 6.7% แต่ AUC 0.86 และ balanced accuracy 0.76 แสดงว่าโมเดลแยกได้จริง
-- **BarongTrace:** ผ่านเกณฑ์ 75% ทาง accuracy เฉพาะเมื่อปรับเกณฑ์จากข้อมูลปกติ ถ้าใช้ 0.5 จะได้ accuracy 0.609 และ recall 0.106
-- **Windows-APT 2025:** balanced accuracy 0.655 แต่ AUC ต่ำกว่า 0.5 จึงเป็นผลของการตั้งเกณฑ์ต่อ host ไม่ใช่โมเดลแยกได้จริง **ไม่ควรอ้าง**
+- **APT29:** accuracy 0.799 *ต่ำกว่า* baseline 0.933 เพราะการโจมตีมีแค่ 6.7% แต่ AUC 0.84–0.87 และ balanced accuracy 0.72 แสดงว่าโมเดลแยกได้จริง
+- **BarongTrace:** accuracy ขึ้นเป็น 0.747 เฉพาะเมื่อปรับเกณฑ์จากข้อมูลปกติ ถ้าใช้ 0.5 จะได้ 0.653 และ recall 0.208
+- **NLME:** ที่เกณฑ์ 0.5 โมเดล flag ไป 61% ของโปรเซสปกติ (accuracy 0.496) เพราะไม่มี CommandLine
+- **Windows-APT 2025:** balanced accuracy 0.637 แต่ AUC ต่ำกว่า 0.5 จึงเป็นผลของการตั้งเกณฑ์ต่อ host ไม่ใช่โมเดลแยกได้จริง **ไม่ควรอ้าง**
 
-### ผลแยกตามเกณฑ์ตัดสิน
+### ผลแยกตามเกณฑ์ตัดสิน (โมเดล 50 run)
 
 | ชุด / ฟีเจอร์ | เกณฑ์ 0.5 (acc / F1 / FPR) | ปกติจากกลุ่มอื่น | ปกติครึ่งแรกของกลุ่มเดียวกัน |
 |---|---|---|---|
-| BarongTrace / paper32 | 0.588 / 0.130 / 0.013 | 0.725 / 0.579 / 0.051 | 0.710 / 0.580 / 0.052 |
-| BarongTrace / clean | 0.609 / 0.191 / 0.003 | **0.757 / 0.644 / 0.050** | 0.743 / 0.646 / 0.055 |
-| APT29 / paper32 | 0.860 / 0.350 / 0.119 | 0.906 / 0.327 / 0.054 | 0.802 / 0.226 / 0.178 |
-| APT29 / clean | 0.796 / 0.318 / 0.198 | 0.904 / 0.316 / 0.055 | 0.796 / 0.204 / 0.182 |
-| NLME / paper32 | 0.823 / 0.281 / 0.020 | 0.823 / 0.287 / 0.020 | 0.813 / 0.148 / 0.023 |
-| Windows-APT / paper32 | 0.391 / 0.542 / 0.800 | 0.434 / 0.502 / 0.027 | 0.440 / 0.526 / 0.049 |
+| BarongTrace / paper32 | 0.575 / 0.061 / 0.007 | 0.717 / 0.562 / 0.051 | 0.722 / 0.605 / 0.053 |
+| BarongTrace / clean | 0.653 / 0.343 / 0.004 | **0.747 / 0.625 / 0.050** | 0.724 / 0.610 / 0.054 |
+| APT29 / paper32 | 0.913 / 0.330 / 0.045 | 0.904 / 0.335 / 0.057 | 0.795 / 0.211 / 0.185 |
+| APT29 / clean | 0.874 / 0.313 / 0.094 | 0.907 / 0.304 / 0.050 | 0.768 / 0.240 / 0.223 |
+| APT29 / neutral | 0.799 / 0.290 / 0.188 | 0.901 / 0.255 / 0.053 | 0.774 / 0.217 / 0.211 |
+| NLME / paper32 | 0.496 / 0.419 / 0.609 | 0.823 / 0.238 / 0.010 | 0.814 / 0.088 / 0.012 |
+| Windows-APT / paper32 | 0.435 / 0.595 / 0.869 | 0.413 / 0.476 / 0.042 | 0.411 / 0.487 / 0.039 |
 
 baseline F1 (ทายว่าโจมตีทั้งหมด): BarongTrace 0.607 · APT29 0.125 · NLME 0.328 · Windows-APT 0.917
 
 ### BarongTrace: ฝึกและทดสอบในชุดเดียวกัน (leave-one-file-out, ไม่มี cmd_len)
-accuracy 0.696, recall 0.433, FPR 0.102, AUC 0.683
+accuracy 0.696, recall 0.433, FPR 0.102, AUC 0.683 (ไม่ใช้ข้อมูลแล็บ)
 
 ตอนลองแค่ 4 ไฟล์ได้ 0.86 พอใช้ครบ 12 ไฟล์ตกเหลือ 0.70 แปลว่า **ตัวเลขจากไฟล์น้อยสูงเกินจริง**
 
-### Splunk attack_data (Linux, ไม่มี label)
-- **ครอบคลุม:** 71 ไฟล์ 6,900 โปรเซส มีอย่างน้อย 1 โปรเซสถูก flag ที่ 0.5 ใน 61 ไฟล์
-- **อันดับแรกตรงคำสั่งโจมตี:** ใน **49 จาก 71 ไฟล์** ตัดสินโดยอ่าน command line เอง เช่น `sudo find . -exec /bin/sh`, `docker run -v /:/mnt/`, `curl -F userfile=@/root/.aws/credentials`, reverse shell `/dev/tcp/...`, `systemctl start hello_evil`
-- **กระบวนการเบื้องหลังที่รู้ว่าปกติ** (Splunk forwarder, systemd, journald): ถูก flag แค่ **0.5%**
-- **พลาด:** exploit แบบ binary เดี่ยว (`./exp`, pkexec, dirtyfrag), การติดตั้งแพ็กเกจที่เป็นขั้นเตรียมการ, wiper `acidrain`
+### Splunk attack_data (Linux, ไม่มี label, โมเดล 50 run)
+- **ครอบคลุม:** 71 ไฟล์ 6,900 โปรเซส มีอย่างน้อย 1 โปรเซสถูก flag ที่ 0.5 ใน 61 ไฟล์ (14.9% ของโปรเซสทั้งหมด)
+- **อันดับแรกตรงคำสั่งโจมตีและถูก flag:** ใน **47 จาก 71 ไฟล์** ตัดสินโดยอ่าน command line เอง เช่น `sudo find . -exec /bin/sh`, `docker run -v /:/mnt/`, `curl -F userfile=@/root/.aws/credentials`, reverse shell `/dev/tcp/...`, `systemctl start hello_evil`
+- **กระบวนการเบื้องหลังที่รู้ว่าปกติ** (Splunk forwarder, systemd, journald): ถูก flag แค่ **0.3%**
+- **พลาด:** exploit แบบ binary เดี่ยว (`./exp`, pkexec, dirtyfrag), การติดตั้งแพ็กเกจที่เป็นขั้นเตรียมการ, wiper `acidrain`, `awfulshred`
 - ⚠️ 13 ไฟล์มีไม่เกิน 3 โปรเซส (Splunk ตัดมาเฉพาะคำสั่งโจมตี) จึงติดอันดับแรกง่าย และหลายไฟล์ใช้ Atomic Red Team / GTFOBins เหมือนแล็บ **ผลจึงค่อนข้างเข้าทางโมเดล**
 
-### เทรนด้วยทั้ง 50 run (dataset สุดท้ายของโปรเจค)
+### เทียบโมเดล 12 run (เปเปอร์) กับ 50 run (dataset สุดท้าย)
 
 `data/FINAL_DATASET_50runs.csv.gz` = ชุดหลัก 12 run + รอบใหม่ 2 + เก็บซ้ำ 24 + เครื่องที่สอง 12 (487,873 event, 4 เครื่อง)
 สร้างด้วย `python host/build_dataset50.py` ใช้เทรนโมเดลในเว็บ (`models/paper_rf_*.pkl`) ตารางในเปเปอร์ยังใช้ชุด 12 run
@@ -105,10 +107,14 @@ accuracy 0.696, recall 0.433, FPR 0.102, AUC 0.683
 | BarongTrace clean + เกณฑ์จากไฟล์อื่น: acc / F1 | 0.757 / 0.644 | 0.747 / 0.625 |
 | BarongTrace AUC paper32 / clean | 0.774 / 0.683 | 0.756 / 0.611 |
 | APT29 AUC paper32 / clean | 0.832 / 0.861 | 0.858 / 0.869 |
-| APT29 paper32 เกณฑ์ 0.5: recall / FPR | 0.569 / 0.119 | 0.324 / 0.045 |
+| APT29 balanced acc ดีที่สุด | 0.759 (clean, 0.5) | 0.715 (neutral, 0.5) |
+| NLME AUC paper32 | 0.705 | 0.693 |
+| Windows-APT AUC paper32 | 0.474 | 0.464 |
+| Splunk อันดับแรกตรง / background ถูก flag | 49/71 · 0.5% | 47/71 · 0.3% |
 
-**ข้อมูลมากขึ้นไม่ได้ทำให้ผลนอกแล็บดีขึ้นชัด** (Windows AUC ขึ้น 0.01–0.03, Linux ลง 0.02–0.07)
-เพราะ 24 จาก 38 run ที่เพิ่มเป็นรอบซ้ำบนเครื่องเดิมด้วยสถานการณ์และ ART ชุดเดิม → สิ่งที่ขาดคือความหลากหลาย ไม่ใช่ปริมาณ
+**ข้อมูลมากขึ้นไม่ได้ทำให้ผลนอกแล็บดีขึ้นชัด**: AUC ต่างกันไม่เกิน 0.03 ยกเว้น BarongTrace clean (−0.07)
+โมเดล 50 run ระวังขึ้น คือ FPR ต่ำลงแต่ recall ที่เกณฑ์ 0.5 ลดลง
+เหตุผล: 24 จาก 38 run ที่เพิ่มเป็นรอบซ้ำบนเครื่องเดิมด้วยสถานการณ์และ ART ชุดเดิม → สิ่งที่ขาดคือความหลากหลาย ไม่ใช่ปริมาณ
 
 ---
 
@@ -142,10 +148,10 @@ accuracy 0.696, recall 0.433, FPR 0.102, AUC 0.683
 ข้อมูลภายนอกอ่านเป็นข้อมูลเท่านั้น ไม่รันสคริปต์ที่มากับ dataset (เช่น `scripts/` ของ Windows-APT 2025)
 
 ```bash
-gunzip -c data/FINAL_DATASET_fixed.csv.gz > host/dataset/merged_dataset.csv     # ข้อมูลแล็บฉบับแก้แล้ว
+gunzip -c data/FINAL_DATASET_fixed.csv.gz > host/dataset/merged_dataset.csv     # ข้อมูลแล็บ 12 run (ไม่ใส่ --lab = โมเดลของเปเปอร์)
 
 # BarongTrace + NLME
-python host/public_eval.py --barong <โฟลเดอร์ที่แตก Original_Linux/*result.zip> --nlme reference/NLME.csv
+python host/public_eval.py --lab data/FINAL_DATASET_50runs.csv.gz --barong <โฟลเดอร์ที่แตก Original_Linux/*result.zip> --nlme reference/NLME.csv
 
 # APT29: แตก apt29_evals_day{1,2}_manual.zip แล้วแปลง + ติด label
 python host/public_sets/apt29_convert.py <day1.json> <dir>/apt29_day1.csv
@@ -155,7 +161,7 @@ python host/public_sets/apt29_label.py <dir>                       # -> <dir>/ap
 # Windows-APT 2025: ไฟล์ CSV รายช่วง (ไม่ใช้ combined.csv) ตรวจ checksums.sha256 ก่อน
 python host/public_sets/wapt2025_convert.py <โฟลเดอร์ CSV> <dir>/wapt_events.csv
 
-python host/public_eval.py [--lab data/FINAL_DATASET_50runs.csv.gz] --events <dir>/apt29_events.csv "OTRF APT29" windows \
+python host/public_eval.py --lab data/FINAL_DATASET_50runs.csv.gz --events <dir>/apt29_events.csv "OTRF APT29" windows \
                            --events <dir>/wapt_events.csv "Windows-APT 2025" windows
 
 # Splunk attack_data (Linux): โหลด sysmon_linux*.log ผ่าน git-lfs แล้ว
