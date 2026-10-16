@@ -95,6 +95,21 @@ accuracy 0.696, recall 0.433, FPR 0.102, AUC 0.683
 - **พลาด:** exploit แบบ binary เดี่ยว (`./exp`, pkexec, dirtyfrag), การติดตั้งแพ็กเกจที่เป็นขั้นเตรียมการ, wiper `acidrain`
 - ⚠️ 13 ไฟล์มีไม่เกิน 3 โปรเซส (Splunk ตัดมาเฉพาะคำสั่งโจมตี) จึงติดอันดับแรกง่าย และหลายไฟล์ใช้ Atomic Red Team / GTFOBins เหมือนแล็บ **ผลจึงค่อนข้างเข้าทางโมเดล**
 
+### เทรนด้วยทั้ง 50 run (dataset สุดท้ายของโปรเจค)
+
+`data/FINAL_DATASET_50runs.csv.gz` = ชุดหลัก 12 run + รอบใหม่ 2 + เก็บซ้ำ 24 + เครื่องที่สอง 12 (487,873 event, 4 เครื่อง)
+สร้างด้วย `python host/build_dataset50.py` ใช้เทรนโมเดลในเว็บ (`models/paper_rf_*.pkl`) ตารางในเปเปอร์ยังใช้ชุด 12 run
+
+| ชุด / ตัวชี้วัด | เทรน 12 run | เทรน 50 run |
+|---|---|---|
+| BarongTrace clean + เกณฑ์จากไฟล์อื่น: acc / F1 | 0.757 / 0.644 | 0.747 / 0.625 |
+| BarongTrace AUC paper32 / clean | 0.774 / 0.683 | 0.756 / 0.611 |
+| APT29 AUC paper32 / clean | 0.832 / 0.861 | 0.858 / 0.869 |
+| APT29 paper32 เกณฑ์ 0.5: recall / FPR | 0.569 / 0.119 | 0.324 / 0.045 |
+
+**ข้อมูลมากขึ้นไม่ได้ทำให้ผลนอกแล็บดีขึ้นชัด** (Windows AUC ขึ้น 0.01–0.03, Linux ลง 0.02–0.07)
+เพราะ 24 จาก 38 run ที่เพิ่มเป็นรอบซ้ำบนเครื่องเดิมด้วยสถานการณ์และ ART ชุดเดิม → สิ่งที่ขาดคือความหลากหลาย ไม่ใช่ปริมาณ
+
 ---
 
 ## 4. ทำไมบางชุดใช้ไม่ได้
@@ -140,7 +155,7 @@ python host/public_sets/apt29_label.py <dir>                       # -> <dir>/ap
 # Windows-APT 2025: ไฟล์ CSV รายช่วง (ไม่ใช้ combined.csv) ตรวจ checksums.sha256 ก่อน
 python host/public_sets/wapt2025_convert.py <โฟลเดอร์ CSV> <dir>/wapt_events.csv
 
-python host/public_eval.py --events <dir>/apt29_events.csv "OTRF APT29" windows \
+python host/public_eval.py [--lab data/FINAL_DATASET_50runs.csv.gz] --events <dir>/apt29_events.csv "OTRF APT29" windows \
                            --events <dir>/wapt_events.csv "Windows-APT 2025" windows
 
 # Splunk attack_data (Linux): โหลด sysmon_linux*.log ผ่าน git-lfs แล้ว
@@ -150,6 +165,7 @@ python host/export_model.py && python host/public_sets/splunk_rank.py <dir> mode
 
 หน้าเว็บ (`python model_web/model_web.py`) ทดสอบไฟล์ CSV ใดๆ ได้ด้วยโมเดล `.pkl` และมีปุ่ม **"ตั้งเกณฑ์จาก CSV ข้อมูลปกติ"** ตามเกณฑ์แบบ (2)
 
-ตัวอย่างที่ทดสอบในเว็บ: BarongTrace ไฟล์ 9 ใช้เกณฑ์ 0.181 จากไฟล์ 1/10/12
-- ไม่ปรับเกณฑ์: accuracy 0.569
-- ปรับเกณฑ์: accuracy 0.725, F1 0.599, FPR 0.022
+ตัวอย่างที่ทดสอบในเว็บ (โมเดล 50 run): BarongTrace ไฟล์ 9 ใช้เกณฑ์ 0.114 จากไฟล์ 1/10/12
+- ไม่ปรับเกณฑ์: accuracy 0.548
+- ปรับเกณฑ์: accuracy 0.721, F1 0.595, FPR 0.027
+- ไฟล์และผลที่ควรเห็นอยู่ใน `demo_data/README.md`

@@ -152,11 +152,12 @@ if __name__ == "__main__":
     ap.add_argument("--events", nargs=3, action="append", default=[], metavar=("CSV", "NAME", "OS"),
                     help="a labelled CSV already in the lab event schema (see host/public_sets/), e.g. APT29")
     ap.add_argument("--data", default=R.DATA)
+    ap.add_argument("--lab", help="lab training CSV instead of --data, e.g. data/FINAL_DATASET_50runs.csv.gz")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(R._HERE), "reference", "public_eval"))
     a = ap.parse_args()
     assert a.barong or a.nlme or a.events, "give --barong, --nlme and/or --events"
     R.DATA = a.data
-    lab_raw = R.load()[0]
+    lab_raw = pd.read_csv(a.lab, low_memory=False) if a.lab else R.load()[0]
     p32, m32, _ = R.aggregate(lab_raw.copy())
     lab = (p32, m32) + feats(lab_raw, True)
     rows = []
