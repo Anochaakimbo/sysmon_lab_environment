@@ -30,3 +30,6 @@ ponytail/
 # Local generated models, evaluation CSVs and uncompressed dataset copy.
 model_web/exports/
 data/FINAL_DATASET_fixed.csv
+
+# Demo CSVs for model_web built from public datasets (third-party data, rebuild with host/public_sets/)
+demo_data/
