@@ -40,7 +40,10 @@
 | **NLME** | Windows | ชุดของเปเปอร์อ้างอิง ([cerberus-trace](https://github.com/bazz-066/cerberus-trace)) 5 เครื่อง | 24,368 โปรเซส | 19.6% | ⚠️ ไม่มี CommandLine |
 | **Windows-APT 2025** | Windows | [Mendeley b8fmtzvpy8 v3](https://data.mendeley.com/datasets/b8fmtzvpy8/3) Caldera + Wazuh | 18,705 โปรเซส | 84.7% | ❌ กรองเป็น alert |
 | **Splunk attack_data** | Linux | [splunk/attack_data](https://github.com/splunk/attack_data) 71 ไฟล์ Sysmon for Linux | 6,900 โปรเซส | ไม่มี label | ⚠️ วัดเชิงคุณภาพ |
+| **OTRF atomic** | Windows | [OTRF Security-Datasets](https://github.com/OTRF/Security-Datasets/tree/master/datasets/atomic/windows) 114 ไฟล์ จำลองด้วย Empire / Covenant / Metasploit / คำสั่งมือ (MIT) | 561,814 event, 4,784 โปรเซส | ไม่มี label | ⚠️ วัดเชิงคุณภาพ |
 | CSU-Ransomware-Data | Windows | [CSCRC-SCREED](https://github.com/CSCRC-SCREED/CSU-Ransomware-Data) | — | — | ❌ มีแต่ฟีเจอร์สำเร็จรูป ไม่มี event ดิบ |
+| SILRAD | Windows | [Zenodo 17104902](https://zenodo.org/records/17104902) ransomware 6 ตระกูล | ~197k event | 10.5% | ❌ ทุกคอลัมน์แปลงเป็นตัวเลข fastText แล้ว ไม่มี UtcTime |
+| SecureCorpus | Windows | [IEEE DataPort](https://ieee-dataport.org/documents/securecorpus) | — | — | ❌ ต้อง subscribe, log ที่ประมวลผลแล้ว มีแต่ฝั่งโจมตี บางส่วนสังเคราะห์ |
 
 ### label มาจากไหน (สำคัญ: ส่วนใหญ่ไม่ได้ให้มา)
 
@@ -50,7 +53,7 @@
 | APT29 | ติดเองด้วย lineage จากจุดเริ่มตามแผนของ MITRE: `cod.3aka3.scr` (RTLO), PowerShell ซ่อนคำสั่งในรูป, PsExec + `python.exe`/`sdelete64`/`Rar` บน NASHUA, `javamtsup.exe`, `hostui`, `.lnk` → PowerShell, WMI persistence, `kxwn.lock`, WinRM `wsmprovhost.exe` |
 | NLME | label ของเจ้าของชุด |
 | Windows-APT 2025 | ติดเองด้วย lineage จาก agent ของ Caldera (`C:\Users\Public\splunkd.exe`, `caldera-agent3.exe`) และตัดโปรเซสที่สายขาดผ่าน shell ทิ้ง 18,002 ตัว |
-| Splunk | ไม่มี → ดูว่าโปรเซสที่ได้คะแนนสูงสุดในแต่ละไฟล์คือคำสั่งโจมตีหรือไม่ |
+| Splunk, OTRF atomic | ไม่มี → ดูว่าโปรเซสที่ได้คะแนนสูงสุดในแต่ละไฟล์คือการโจมตีหรือไม่ (ตัดสินเองจาก image / command line) |
 
 ---
 
@@ -96,6 +99,22 @@ accuracy 0.696, recall 0.433, FPR 0.102, AUC 0.683 (ไม่ใช้ข้อ�
 - **กระบวนการเบื้องหลังที่รู้ว่าปกติ** (Splunk forwarder, systemd, journald): ถูก flag แค่ **0.3%**
 - **พลาด:** exploit แบบ binary เดี่ยว (`./exp`, pkexec, dirtyfrag), การติดตั้งแพ็กเกจที่เป็นขั้นเตรียมการ, wiper `acidrain`, `awfulshred`
 - ⚠️ 13 ไฟล์มีไม่เกิน 3 โปรเซส (Splunk ตัดมาเฉพาะคำสั่งโจมตี) จึงติดอันดับแรกง่าย และหลายไฟล์ใช้ Atomic Red Team / GTFOBins เหมือนแล็บ **ผลจึงค่อนข้างเข้าทางโมเดล**
+
+### OTRF atomic (Windows, ไม่มี label, โมเดล 50 run)
+114 ไฟล์ แต่ละไฟล์จับช่วงสั้นๆ ระหว่างทำ technique เดียว (credential access, lateral movement, defense evasion ฯลฯ)
+ส่วนใหญ่ใช้ C2 (Empire, Covenant, Metasploit) **ไม่ใช่ Atomic Red Team** จึงต่างจากแล็บมากกว่าที่คาด
+
+| ผล (ตัดสินเองจาก image / command line ของโปรเซสอันดับหนึ่ง) | ไฟล์ |
+|---|---|
+| อันดับหนึ่งเป็นการโจมตีและถูก flag (> 0.5) | **42** |
+| อันดับหนึ่งเป็นการโจมตีแต่คะแนนไม่ถึง 0.5 | 20 |
+| อันดับหนึ่งไม่ใช่การโจมตี | 52 |
+
+- โปรเซสถูก flag แค่ 3.9% ของทั้งหมด จึงไม่ flag ทุกอย่าง
+- **จับได้ดี:** Empire ที่สั่งคำสั่ง Windows เช่น `net user /domain`, `whoami`, `sc \host stop`, `cmd`, การ compile ด้วย csc/cvtres, ตัวรัน Rubeus/mimikatz, LOLBin (`wuauclt`, `InstallUtil`, `WMIC /node`, `fodhelper`, `schtasks /create`)
+- **พลาด:** Covenant ซึ่งทำงานใน memory ของ .NET โดยไม่สร้างโปรเซสลูก, การแก้ registry ด้วย `reg add` ครั้งเดียว และช่วงที่ไม่มี ProcessCreate (agent เริ่มทำงานก่อนเริ่มเก็บ)
+- **false positive เด่น:** `OneDrive.exe /setautostart` (0.89), `logman`/`wevtutil` ของ Azure guest agent (0.85–0.88), `identity_helper.exe` ของ Edge
+- ⚠️ `whoami` ได้คะแนนสูงทุกไฟล์ (0.67–0.70) เพราะ Atomic Red Team ในแล็บเรียก whoami บ่อย ตรงนี้คือโมเดลจำชื่อเครื่องมือ discovery ไม่ใช่พฤติกรรม
 
 ### เทียบโมเดล 12 run (เปเปอร์) กับ 50 run (dataset สุดท้าย)
 
@@ -166,7 +185,11 @@ python host/public_eval.py --lab data/FINAL_DATASET_50runs.csv.gz --events <dir>
 
 # Splunk attack_data (Linux): โหลด sysmon_linux*.log ผ่าน git-lfs แล้ว
 python host/public_sets/splunk_parse.py <โฟลเดอร์ log> <dir>/splunk_events.csv
-python host/export_model.py && python host/public_sets/splunk_rank.py <dir> models/paper_rf_linux.pkl
+python host/public_sets/rank_unlabelled.py <dir>/splunk_events.csv models/paper_rf_linux.pkl <dir>/splunk_scores.csv
+
+# OTRF atomic (Windows): datasets/atomic/windows/*/host/*.zip จาก github.com/OTRF/Security-Datasets
+python host/public_sets/otrf_atomic_convert.py <โฟลเดอร์ zip> <dir>/otrf_events.csv
+python host/public_sets/rank_unlabelled.py <dir>/otrf_events.csv models/paper_rf_windows.pkl <dir>/otrf_scores.csv
 ```
 
 หน้าเว็บ (`python model_web/model_web.py`) ทดสอบไฟล์ CSV ใดๆ ได้ด้วยโมเดล `.pkl` และมีปุ่ม **"ตั้งเกณฑ์จาก CSV ข้อมูลปกติ"** ตามเกณฑ์แบบ (2)
