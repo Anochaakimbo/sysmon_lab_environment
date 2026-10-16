@@ -13,8 +13,8 @@ host/payloads/
 host/logs_win/
 atomic_report_win.txt
 
-# โมเดลที่เทรนแล้ว - สร้างใหม่ได้ด้วย host/ml_train.py
-models/
+# โมเดลที่เทรนแล้ว: เก็บใน git ให้ pull ไปสาธิตได้ ยกเว้นตัวที่เกิน 100MB ของ GitHub (สร้างใหม่ได้ด้วย host/ml_train.py)
+models/process_process.pkl
 
 # Generated web exports are kept locally; reproduce with model_web/export_updated_rf.py.
 model_web/exports/
@@ -31,5 +31,3 @@ ponytail/
 model_web/exports/
 data/FINAL_DATASET_fixed.csv
 
-# Demo CSVs for model_web built from public datasets (third-party data, rebuild with host/public_sets/)
-demo_data/
